@@ -126,9 +126,22 @@ function TaskAndQuestion() {
 
   return (
     <StageContainer step={1} title="选择研究任务" agent={msg}>
-      <div className="card">
-        <h3 className="font-semibold mb-2">📈 排序算法对比</h3>
-        <p className="text-sm text-gray-500">对比暴力法（冒泡/选择）和分治法（归并/快排），研究算法复杂度的真正含义。</p>
+      {/* 双选卡片：排序 vs 字符串搜索 */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+        <div className={`card flex flex-col cursor-pointer transition-all ${isSort ? "ring-2 ring-gray-500 bg-gray-50/50" : "hover:shadow-md hover:bg-gray-50/30"}`}
+          onClick={() => store.set({ experimentType: "sorting" })}>
+          <h3 className="font-semibold mb-1">📈 排序算法对比</h3>
+          <p className="text-xs text-gray-500 mb-2">对比暴力法（冒泡/选择）和分治法（归并/快排），观看数组排序过程的实时动画。</p>
+          <div className="flex flex-wrap gap-1">{[{k:"BUBBLE",n:"冒泡"},{k:"SELECTION",n:"选择"},{k:"MERGE",n:"归并"},{k:"QUICK",n:"快排"}].map(s=><span key={s.k} className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{s.n}</span>)}</div>
+          {isSort && <span className="text-[10px] text-gray-400 mt-2">✓ 当前选择</span>}
+        </div>
+        <div className={`card flex flex-col cursor-pointer transition-all ${!isSort ? "ring-2 ring-teal-500 bg-teal-50/50" : "hover:shadow-md hover:bg-gray-50/30"}`}
+          onClick={() => store.set({ experimentType: "stringsearch" })}>
+          <h3 className="font-semibold mb-1">🔍 字符串搜索对比</h3>
+          <p className="text-xs text-gray-500 mb-2">对比暴力搜索、KMP、Boyer-Moore、Rabin-Karp，在文本中查找模式串。</p>
+          <div className="flex flex-wrap gap-1">{[{k:"NAIVE",n:"暴力"},{k:"KMP",n:"KMP"},{k:"BOYER_MOORE",n:"BM"},{k:"RABIN_KARP",n:"RK"}].map(s=><span key={s.k} className="text-[10px] bg-teal-50 text-teal-600 px-2 py-0.5 rounded-full">{s.n}</span>)}</div>
+          {!isSort && <span className="text-[10px] text-teal-500 mt-2">✓ 当前选择</span>}
+        </div>
       </div>
 
       <div className="card">
