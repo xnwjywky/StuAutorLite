@@ -88,6 +88,22 @@ const REFLECTION_QUESTIONS = [
   "你的实验有什么局限（例如迷宫太小、次数太少）？",
 ];
 
+/** 根据 summary 的字段类型智能格式化 */
+function formatSummaryValue(stats: Record<string, any>): string {
+  const parts: string[] = [];
+  if (stats.avg_accuracy != null) parts.push(`准确率 ${(stats.avg_accuracy * 100).toFixed(1)}%`);
+  if (stats.avg_f1 != null) parts.push(`F1 ${(stats.avg_f1 * 100).toFixed(1)}%`);
+  if (stats.success_rate != null) parts.push(`成功率 ${(stats.success_rate * 100).toFixed(0)}%`);
+  if (stats.avg_path_length != null) parts.push(`路径 ${stats.avg_path_length}`);
+  if (stats.avg_expanded_nodes != null) parts.push(`探索 ${stats.avg_expanded_nodes} 节点`);
+  if (stats.avg_swaps != null) parts.push(`交换 ${stats.avg_swaps} 次`);
+  if (stats.avg_guesses != null) parts.push(`平均 ${stats.avg_guesses} 次猜测`);
+  if (stats.avg_comparisons != null) parts.push(`比较 ${stats.avg_comparisons} 次`);
+  if (stats.avg_matches != null) parts.push(`匹配 ${stats.avg_matches} 处`);
+  if (stats.avg_runtime_ms != null) parts.push(`${stats.avg_runtime_ms}ms`);
+  return parts.length > 0 ? parts.join(" · ") : JSON.stringify(stats).slice(0, 60);
+}
+
 export default function Archive() {
   const navigate = useNavigate();
   const archives = useMemo(() => loadArchives(), []);
@@ -162,19 +178,15 @@ export default function Archive() {
                         <table className="text-xs border-collapse">
                           <thead>
                             <tr className="text-gray-400">
-                              <th className="pr-3 py-1 text-left">算法</th>
-                              <th className="pr-3 py-1">成功率</th>
-                              <th className="pr-3 py-1">平均节点</th>
-                              <th className="pr-3 py-1">平均耗时</th>
+                              <th className="pr-3 py-1 text-left">算法/策略</th>
+                              <th className="pr-3 py-1">关键指标</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {Object.entries(a.summary).map(([algo, stats]) => (
+                            {Object.entries(a.summary).map(([algo, stats]: [string, any]) => (
                               <tr key={algo}>
                                 <td className="pr-3 py-0.5 font-medium">{algo}</td>
-                                <td className="pr-3 py-0.5">{(stats.success_rate * 100).toFixed(0)}%</td>
-                                <td className="pr-3 py-0.5">{stats.avg_expanded_nodes.toFixed(0)}</td>
-                                <td className="pr-3 py-0.5">{stats.avg_runtime_ms.toFixed(1)}ms</td>
+                                <td className="pr-3 py-0.5 text-gray-500">{formatSummaryValue(stats)}</td>
                               </tr>
                             ))}
                           </tbody>
