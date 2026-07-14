@@ -21,6 +21,14 @@ interface ArchivedSession {
 
 const STORAGE_KEY = "stuautor_archives";
 
+function uuid(): string {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return "xxxx-xxxx-4xxx-yxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
 function loadArchives(): ArchivedSession[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -41,12 +49,13 @@ export function archiveSession(data: {
   report: string;
   review: Record<string, number> | null;
 }) {
-  const archives = loadArchives();
-  const avgScore = data.review
-    ? Object.values(data.review).reduce((a, b) => a + b, 0) / Object.values(data.review).length
-    : 0;
-  archives.unshift({
-    id: crypto.randomUUID(),
+  try {
+    const archives = loadArchives();
+    const avgScore = data.review
+      ? Object.values(data.review).reduce((a, b) => a + b, 0) / Object.values(data.review).length
+      : 0;
+    archives.unshift({
+      id: uuid(),
     title: data.question ? data.question.slice(0, 40) + (data.question.length > 40 ? "..." : "") : "迷宫寻路算法比较研究",
     taskId: data.taskId,
     completedAt: new Date().toISOString(),
@@ -59,9 +68,10 @@ export function archiveSession(data: {
     report: data.report,
     review: data.review,
     avgReviewScore: Math.round(avgScore * 10) / 10,
-  });
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(archives));
-  return archives;
+    });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(archives));
+    return archives;
+  } catch { return []; }
 }
 
 export { loadArchives };

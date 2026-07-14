@@ -780,18 +780,19 @@ function Stage9() {
 
   const complete = () => {
     const scores = store.reviewResult?.scores || {};
-    archiveSession({ sessionId: store.sessionId, taskId: store.taskId, question: store.refinedQuestion || store.rawQuestion, hypothesis: store.hypothesis, algorithms: store.selectedAlgorithms, summary: store.experimentResult?.summary || null, analysis: store.studentAnalysis, reflection: store.reflectionAnswers, report: store.reportMarkdown, review: scores });
+    try { archiveSession({ sessionId: store.sessionId, taskId: store.taskId, question: store.refinedQuestion || store.rawQuestion, hypothesis: store.hypothesis, algorithms: store.selectedAlgorithms, summary: store.experimentResult?.summary || null, analysis: store.studentAnalysis, reflection: store.reflectionAnswers, report: store.reportMarkdown, review: scores }); } catch {}
     const d: Record<string, number> = {};
-    if (store.refinedQuestion.trim()) d.question = 0.5; if (store.hypothesis.trim()) d.hypothesis = 0.3;
+    if (store.refinedQuestion.trim()) d.question = 0.5; if ((store.hypothesis || "").trim()) d.hypothesis = 0.3;
     if (store.selectedAlgorithms.length >= 2) d.design = 0.4; if (store.selectedAlgorithms.length >= 3) d.algorithm = 0.3;
     if (store.studentAnalysis.trim()) d.analysis = 0.4; if (Object.values(store.reflectionAnswers).some((v) => v?.trim())) d.reflection = 0.3;
-    if (store.reportMarkdown.length > 200) d.expression = 0.4;
+    if ((store.reportMarkdown || "").length > 200) d.expression = 0.4;
     const add = (k: string, v: number) => { d[k] = Math.min(5, Math.round(((d[k] || 0) + v) * 10) / 10); };
     if (scores.question_clarity) add("question", scores.question_clarity * 0.2);
     if (scores.experiment_design) add("design", scores.experiment_design * 0.2);
     if (scores.analysis_depth) add("analysis", scores.analysis_depth * 0.2);
     if (scores.reflection_quality) add("reflection", scores.reflection_quality * 0.2);
-    updateProfileScores(d); navigate("/archive");
+    try { updateProfileScores(d); } catch {}
+    navigate("/archive");
   };
 
   const r = store.reviewResult;
