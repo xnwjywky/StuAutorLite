@@ -44,5 +44,5 @@ htmlcov/
 .nyc_output/
 frontend/coverage/
 
-# Package lock (optional, keep for reproducibility)
-# frontend/package-lock.json
+# Work log (internal, not published)
+work.md
