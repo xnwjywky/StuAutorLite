@@ -11,14 +11,12 @@ import AlgorithmCard from "../components/AlgorithmCard";
 import SortVisualizer from "../components/SortVisualizer";
 import StringSearchVisualizer from "../components/StringSearchVisualizer";
 import { useAlgoCompareStore } from "../stores/sortingStore";
-import { runSortingExperiment, runStringSearchExperiment, saveQuestion, saveHypothesis, saveAnalysis, callMentor, callDataAnalyst, hasAgentConfig, logAgentError } from "../api/service";
+import { runSortingExperiment, runStringSearchExperiment, saveQuestion, saveAnalysis, callMentor, callDataAnalyst, hasAgentConfig, logAgentError } from "../api/service";
 import { archiveSession } from "./Archive";
 import type { ResearchStage, SortingAlgorithmType, StringSearchAlgorithmType } from "../types";
 
 const STEPS: { key: ResearchStage; label: string }[] = [
   { key: "TASK_SELECTED",       label: "选择研究任务" },
-  { key: "QUESTION_DEFINED",    label: "确定研究问题" },
-  { key: "HYPOTHESIS_WRITTEN",  label: "写出实验假设" },
   { key: "EXPERIMENT_DESIGNED", label: "设计实验" },
   { key: "EXPERIMENT_RUNNING",  label: "运行实验" },
   { key: "RESULT_ANALYZED",     label: "分析结果" },
@@ -70,7 +68,9 @@ export default function SortingWorkbench() {
           <h1 className="text-lg font-bold text-gray-800 mb-2">研究工作台</h1>
           <p className="text-xs text-gray-400 mb-4">{isSort ? "排序算法比较研究" : "字符串搜索算法研究"}</p>
           <FlowStepper steps={STEPS} current={store.currentStage} onStepClick={(s) => {
+            if (s === "TASK_SELECTED") { store.setStage("TASK_SELECTED"); return; }
             const keys = STEPS.map(st => st.key);
+            if (!store.refinedQuestion) { store.setStage("TASK_SELECTED"); return; }
             if (keys.indexOf(s) > keys.indexOf("EXPERIMENT_DESIGNED") && !store.designCompleted) store.setStage("EXPERIMENT_DESIGNED");
             else store.setStage(s);
           }} />
@@ -84,54 +84,111 @@ export default function SortingWorkbench() {
 function StageRouter() {
   const stage = useAlgoCompareStore((s) => s.currentStage);
   switch (stage) {
-    case "QUESTION_DEFINED": return <Stage2 />; case "HYPOTHESIS_WRITTEN": return <Stage3 />;
     case "EXPERIMENT_DESIGNED": return <Stage4 />; case "EXPERIMENT_RUNNING": return <Stage5 />;
     case "RESULT_ANALYZED": return <Stage6 />; case "REPORT_GENERATED": return <Stage7 />;
-    default: return <Stage1 />;
+    default: return <TaskAndQuestion />;
   }
 }
-
-function Stage1() {
+// ═══════ 统一任务选择 + 研究问题 + 流程预览 ═══════
+function TaskAndQuestion() {
   const store = useAlgoCompareStore();
-  const setType = (t: "sorting" | "stringsearch") => { store.set({ experimentType: t }); store.setStage("QUESTION_DEFINED"); };
-  return (
-    <StageContainer step={1} title="选择研究任务— 可视化算法比较">
-      <p className="text-sm text-gray-400 mb-4">从以下两种实验选择一个开始：</p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="card flex flex-col" onClick={() => setType("sorting")}>
-          <h3 className="font-semibold mb-2">📈 排序算法对比</h3>
-          <p className="text-sm text-gray-500 mb-3">对比暴力法（冒泡/选择）和分治法（归并/快排），观看数组排序过程的实时动画。</p>
-          <div className="flex flex-wrap gap-1 mb-3">{["冒泡","选择","归并","快排"].map(s=><span key={s} className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{s}</span>)}</div>
-          <button className="btn-primary w-full">开始 →</button>
-        </div>
-        <div className="card flex flex-col" onClick={() => setType("stringsearch")}>
-          <h3 className="font-semibold mb-2">🔍 字符串搜索对比</h3>
-          <p className="text-sm text-gray-500 mb-3">对比暴力搜索、KMP、Boyer-Moore、Rabin-Karp，在文本中查找模式串。</p>
-          <div className="flex flex-wrap gap-1 mb-3">{["暴力","KMP","BM","RK"].map(s=><span key={s} className="text-[10px] bg-teal-50 text-teal-600 px-2 py-0.5 rounded-full">{s}</span>)}</div>
-          <button className="btn-primary w-full">开始 →</button>
-        </div>
-      </div>
-    </StageContainer>
-  );
-}
-
-function Stage2() {
-  const store = useAlgoCompareStore(); const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const isSort = store.experimentType === "sorting";
   const taskName = isSort ? "数组排序" : "字符串搜索";
   const templates = isSort
     ? ["暴力法(冒泡/选择)和分治法(归并/快排)，谁的交换次数更少？", "数组规模变大后，哪种排序算法受的影响最小？", "为什么归并排序比冒泡排序快得多？"]
     : ["暴力搜索和 KMP 谁在大文本中更快？", "Boyer-Moore 为什么能跳过那么多字符？", "当模式串不存在时，哪种算法最省比较次数？"];
-  const handleSuggest = async () => { if (!store.rawQuestion.trim()) return; setLoading(true); setMsg(null); const r = await callAgent("research_mentor", "研究问题", () => callMentor({ task: taskName, student_input: store.rawQuestion, grade_level: "beginner" })); store.set({ suggestedQuestions: r.ok ? (r.data as any).suggested_questions || [templates[0]] : [templates[0]] }); if (!r.ok) setMsg({ text: r.error, ok: false }); setLoading(false); };
-  return (<StageContainer step={2} title="确定研究问题" agent={msg} actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => { store.set({ currentStage: "TASK_SELECTED" }); }}>← 上一步</button><button className="btn-primary" onClick={async () => { try { await saveQuestion({ session_id: store.sessionId!, raw_question: store.rawQuestion, refined_question: store.refinedQuestion, independent_variable: "算法类型", dependent_variables: ["操作次数"], controlled_variables: isSort ? ["数组大小","数据分布"] : ["文本长度","模式串长度"] }); } catch {} store.setStage("HYPOTHESIS_WRITTEN"); }} disabled={!store.refinedQuestion}>确认 → 写假设</button></div>}><div className="card"><h2 className="font-semibold text-gray-700 mb-3">可选问题模板</h2><div className="grid gap-2">{templates.map(t => <button key={t} onClick={() => store.set({ rawQuestion: t })} className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${store.rawQuestion === t ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}>{t}</button>)}</div></div><div className="card"><textarea className="w-full min-h-[80px] p-3 border rounded-lg text-sm resize-y" placeholder={isSort ? "例如：暴力法是不是总比分治法慢？" : "例如：KMP 是不是总比暴力搜索快？"} value={store.rawQuestion} onChange={(e) => store.set({ rawQuestion: e.target.value })} /><button className="btn-primary mt-3" onClick={handleSuggest} disabled={loading}>{loading ? "生成中..." : "AI 帮我转化"}</button></div>{store.suggestedQuestions.length > 0 && <div className="card border-gray-200 bg-gray-50"><h2 className="font-semibold text-gray-700 mb-3">AI 建议的研究问题（点击选择）</h2>{store.suggestedQuestions.map((q, i) => <button key={i} onClick={() => store.set({ refinedQuestion: q })} className={`w-full text-left px-3 py-2 rounded-lg text-sm mb-1 ${store.refinedQuestion === q ? "bg-gray-900 text-white font-medium" : "bg-white text-gray-700 hover:bg-gray-100 border"}`}>{q}</button>)}</div>}{store.refinedQuestion && <div className="card border-blue-200 bg-blue-50/50"><h3 className="font-semibold text-sm text-gray-700 mb-2">你的研究问题：</h3><p className="text-sm text-gray-800 font-medium">{store.refinedQuestion}</p></div>}</StageContainer>);
+
+  const handleSuggest = async () => {
+    if (!store.rawQuestion.trim()) return;
+    setLoading(true); setMsg(null);
+    const result = await callAgent("research_mentor", "研究问题", () =>
+      callMentor({ task: taskName, student_input: store.rawQuestion, grade_level: "beginner" }));
+    if (result.ok) store.set({ suggestedQuestions: (result.data as any).suggested_questions || [templates[0]] });
+    else { store.set({ suggestedQuestions: [templates[0]] }); setMsg({ text: result.error, ok: false }); }
+    setLoading(false);
+  };
+
+  const handleSelectQuestion = async (q: string) => {
+    store.set({ refinedQuestion: q, rawQuestion: q });
+    try { await saveQuestion({ session_id: store.sessionId!, raw_question: q, refined_question: q, independent_variable: "算法类型", dependent_variables: ["操作次数"], controlled_variables: isSort ? ["数组大小","数据分布"] : ["文本长度","模式串长度"] }); } catch {}
+  };
+
+  const handleConfirm = () => {
+    store.set({ designCompleted: false, experimentResult: null });
+    store.setStage("EXPERIMENT_DESIGNED");
+  };
+
+  const selectedQ = store.refinedQuestion;
+  const flowItems = selectedQ ? buildFlowPreview(store) : null;
+  const hasSuggestions = store.suggestedQuestions.length > 0;
+
+  return (
+    <StageContainer step={1} title="选择研究任务" agent={msg}>
+      <div className="card">
+        <h3 className="font-semibold mb-2">📈 排序算法对比</h3>
+        <p className="text-sm text-gray-500">对比暴力法（冒泡/选择）和分治法（归并/快排），研究算法复杂度的真正含义。</p>
+      </div>
+
+      <div className="card">
+        <h2 className="font-semibold text-gray-700 mb-3">选择或输入你想研究的问题</h2>
+        <div className="grid gap-2 mb-3">{templates.map((t) => (
+          <button key={t} onClick={() => handleSelectQuestion(t)}
+            className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedQ === t ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}>{t}</button>
+        ))}</div>
+        <textarea className="w-full min-h-[60px] p-3 border rounded-lg text-sm resize-y" placeholder="或用你自己的话描述..."
+          value={store.rawQuestion} onChange={(e) => store.set({ rawQuestion: e.target.value })} />
+        <button className="btn-primary mt-3" onClick={handleSuggest} disabled={loading || !store.rawQuestion.trim()}>{loading ? "生成中..." : "AI 帮我转化"}</button>
+        {hasSuggestions && (
+          <div className="mt-3 border-t border-gray-100 pt-3">
+            <h3 className="font-semibold text-gray-700 text-sm mb-2">AI 建议的研究问题（点击选择）</h3>
+            <div className="space-y-1">{store.suggestedQuestions.map((q, i) => (
+              <button key={i} onClick={() => handleSelectQuestion(q)}
+                className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedQ === q ? "bg-gray-900 text-white font-medium" : "bg-white text-gray-700 hover:bg-gray-100 border border-gray-100"}`}>{q}</button>
+            ))}</div>
+          </div>
+        )}
+      </div>
+
+      {selectedQ && (
+        <>
+          <div className="card border-blue-200 bg-blue-50/50">
+            <h3 className="font-semibold text-sm text-gray-700 mb-2">你的研究问题</h3>
+            <p className="text-sm text-gray-800 font-medium">{selectedQ}</p>
+          </div>
+          {flowItems && (
+            <div className="card border-green-100 bg-green-50/30">
+              <h3 className="font-semibold text-sm text-gray-700 mb-3">📋 研究流程预览</h3>
+              <div className="space-y-2">{flowItems.map((item, i) => (
+                <div key={i} className="flex gap-3 text-xs">
+                  <span className="w-24 text-gray-400 shrink-0">{item.stage}</span>
+                  <span className="text-gray-600">{item.output}</span>
+                </div>
+              ))}</div>
+            </div>
+          )}
+          <div className="flex justify-end">
+            <button className="btn-primary" onClick={handleConfirm}>确认 → 设计实验</button>
+          </div>
+        </>
+      )}
+    </StageContainer>
+  );
 }
 
-function Stage3() {
-  const store = useAlgoCompareStore();
-  return (<StageContainer step={3} title="写出实验假设" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("QUESTION_DEFINED")}>← 上一步</button><button className="btn-primary" onClick={async () => { try { await saveHypothesis(store.sessionId!, store.hypothesis); } catch {} store.setStage("EXPERIMENT_DESIGNED"); }} disabled={!store.hypothesis.trim()}>下一步 → 设计实验</button></div>}><div className="card"><h2 className="font-semibold text-gray-700 mb-3">你的假设</h2><textarea className="w-full min-h-[120px] p-3 border rounded-lg text-sm resize-y" placeholder={store.experimentType === "sorting" ? "例如：我认为归并排序会比冒泡排序少得多的比较次数" : "例如：我认为 Boyer-Moore 会比暴力搜索少得多"} value={store.hypothesis} onChange={(e) => store.set({ hypothesis: e.target.value })} /></div></StageContainer>);
+function buildFlowPreview(store: ReturnType<typeof useAlgoCompareStore.getState>) {
+  const isSort = store.experimentType === "sorting";
+  return [
+    { stage: "选择研究任务", output: isSort ? "排序算法对比 — 暴力法 vs 分治法" : "字符串搜索对比 — 暴力 vs KMP vs BM vs RK" },
+    { stage: "设计实验", output: isSort
+      ? `选择算法 / 数组大小(${store.arraySize}) / 分布 / 重复 ${store.numTrials} 次`
+      : `选择算法 / 文本长度(${store.textLength}) / 模式串(${store.patternLength}) / 重复 ${store.numTrials} 次` },
+    { stage: "运行实验", output: isSort ? "生成数组 → 各算法排序 → 记录每个步骤" : "生成随机文本 → 各算法搜索模式串 → 比对过程动画" },
+    { stage: "分析结果", output: "对比操作次数 / 耗时 → 验证假设" },
+    { stage: "总结报告", output: "自动生成包含数据表格的 Markdown 报告" },
+  ];
 }
-
 function Stage4() {
   const store = useAlgoCompareStore(); const isSort = store.experimentType === "sorting";
   const [infoAlgo, setInfoAlgo] = useState<string | null>(null);
@@ -144,7 +201,7 @@ function Stage4() {
     else { store.set({ [field]: [...arr, a.key] } as any); setInfoAlgo(a.key); }
   };
   const info = infoAlgo ? ALGO_INFO[infoAlgo] ?? null : null;
-  return (<StageContainer step={4} title="设计实验" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("HYPOTHESIS_WRITTEN")}>← 上一步</button><button className="btn-primary" onClick={() => { store.set({ designCompleted: true, experimentResult: null }); store.setStage("EXPERIMENT_RUNNING"); }} disabled={selected.length === 0}>下一步 → 运行实验</button></div>}><div className="card"><h2 className="font-semibold text-gray-700 mb-3">我要比较的算法 {selected.length === 0 && <span className="text-xs font-normal text-gray-400">（请至少选一个）</span>}</h2><div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{algoList.map(a => <AlgorithmCard key={a.key} name={a.name} description={a.description} selected={selected.includes(a.key)} onToggle={() => toggle(a)} />)}</div></div>
+  return (<StageContainer step={2} title="设计实验" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("TASK_SELECTED")}>← 上一步</button><button className="btn-primary" onClick={() => { store.set({ designCompleted: true, experimentResult: null }); store.setStage("EXPERIMENT_RUNNING"); }} disabled={selected.length === 0}>下一步 → 运行实验</button></div>}><div className="card"><h2 className="font-semibold text-gray-700 mb-3">我要比较的算法 {selected.length === 0 && <span className="text-xs font-normal text-gray-400">（请至少选一个）</span>}</h2><div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{algoList.map(a => <AlgorithmCard key={a.key} name={a.name} description={a.description} selected={selected.includes(a.key)} onToggle={() => toggle(a)} />)}</div></div>
     {info && (<div className="card border-blue-200 bg-blue-50/30"><div className="flex items-center justify-between mb-3"><h2 className="font-semibold text-gray-800">{algoList.find(a => a.key === infoAlgo)?.name} 算法原理</h2><button onClick={() => setInfoAlgo(null)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button></div><p className="text-sm text-gray-600 mb-3">{info.explanation}</p><div className="text-xs text-gray-500 mb-3 p-2 bg-white rounded-lg border border-blue-100">💡 {info.analogy}</div><div className="flex flex-wrap gap-1.5 mb-3">{info.key_points.map(p => <span key={p} className="text-[11px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{p}</span>)}</div>{info.pseudocode && <details className="text-xs"><summary className="cursor-pointer text-gray-500 hover:text-gray-700 mb-1">▶ 伪代码</summary><pre className="bg-gray-900 text-green-400 p-3 rounded-lg overflow-x-auto text-[11px] leading-relaxed whitespace-pre font-mono">{info.pseudocode}</pre></details>}</div>)}
     {isSort ? (
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -180,15 +237,15 @@ function Stage5() {
     ? `算法：${(selected.length>0?selected:defAlgos).map(nameOf).join("、")} | ${store.arraySize} 元素 | ${store.dataPattern==="random"?"随机":store.dataPattern==="reversed"?"逆序":"基本有序"} | ×${store.numTrials} 次`
     : `算法：${(selected.length>0?selected:defAlgos).map(nameOf).join("、")} | 文本 ${store.textLength} 字符 | 模式串 ${store.patternLength} 字符 | ×${store.numTrials} 次`;
 
-  return (<StageContainer step={5} title="运行实验" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("EXPERIMENT_DESIGNED")}>← 上一步</button><button className="btn-primary" onClick={() => store.setStage("RESULT_ANALYZED")} disabled={!result}>查看结果 → 分析</button></div>}><div className="card"><div className="flex items-center justify-between flex-wrap gap-3"><div><h2 className="font-semibold">实验配置</h2><p className="text-sm text-gray-400">{configText}</p></div><button className="btn-primary text-lg px-6" onClick={execRun} disabled={running}>{running ? "⏳ 运行中..." : result ? "🔄 重新运行" : "▶ 开始实验"}</button></div>{result && store.numTrials > 1 && (<div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100"><span className="text-xs text-gray-500 font-medium">切换回合：</span>{Array.from({length:store.numTrials},(_,i)=>i+1).map(t=><button key={t} onClick={()=>store.set({selectedTrial:t})} className={`px-3 py-1 rounded-full text-xs font-medium ${store.selectedTrial===t?"bg-gray-900 text-white":"bg-gray-100 text-gray-500"}`}>第{t}回</button>)}</div>)}</div>
+  return (<StageContainer step={3} title="运行实验" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("EXPERIMENT_DESIGNED")}>← 上一步</button><button className="btn-primary" onClick={() => store.setStage("RESULT_ANALYZED")} disabled={!result}>查看结果 → 分析</button></div>}><div className="card"><div className="flex items-center justify-between flex-wrap gap-3"><div><h2 className="font-semibold">实验配置</h2><p className="text-sm text-gray-400">{configText}</p></div><button className="btn-primary text-lg px-6" onClick={execRun} disabled={running}>{running ? "⏳ 运行中..." : result ? "🔄 重新运行" : "▶ 开始实验"}</button></div>{result && store.numTrials > 1 && (<div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100"><span className="text-xs text-gray-500 font-medium">切换回合：</span>{Array.from({length:store.numTrials},(_,i)=>i+1).map(t=><button key={t} onClick={()=>store.set({selectedTrial:t})} className={`px-3 py-1 rounded-full text-xs font-medium ${store.selectedTrial===t?"bg-gray-900 text-white":"bg-gray-100 text-gray-500"}`}>第{t}回</button>)}</div>)}</div>
     {displayRuns.length > 0 && (<div className="card"><h3 className="font-semibold text-gray-700 mb-3 text-sm">第 {store.selectedTrial} 回合 {isSort ? "排序" : "搜索"}过程</h3><div className={layoutClass}>{displayRuns.map((r: any) => (<div key={r.algorithm} className="flex flex-col items-center"><div className="flex items-center gap-2 mb-2"><span className="font-semibold text-sm">{nameOf(r.algorithm)}</span><span className="text-xs text-gray-400">{isSort ? `交换 ${r.swaps} · 比较 ${r.comparisons} · ${r.runtime_ms}ms` : `${r.comparisons} 次比较 · ${r.matches} 匹配 · ${r.runtime_ms}ms`}</span></div>{isSort ? <SortVisualizer key={`${r.algorithm}-${store.selectedTrial}`} steps={r.steps} /> : <StringSearchVisualizer key={`${r.algorithm}-${store.selectedTrial}`} steps={r.steps} />}</div>))}</div></div>)}
     {result && (isSort ? (<div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><ChartPanel data={Object.entries(result.summary).map(([a,s]:any)=>({algorithm:a,v:s.avg_swaps}))} singleMetric={{key:"v",label:"平均交换次数"}} xKey="algorithm" /><ChartPanel data={Object.entries(result.summary).map(([a,s]:any)=>({algorithm:a,v:s.avg_comparisons}))} singleMetric={{key:"v",label:"平均比较次数"}} xKey="algorithm" /></div>) : (<ChartPanel data={Object.entries(result.summary).map(([a,s]:any)=>({algorithm:a,v:s.avg_comparisons}))} singleMetric={{key:"v",label:"平均比较次数"}} xKey="algorithm" />))}
   </StageContainer>);
 }
 
-function Stage6() { const store = useAlgoCompareStore(); const isSort = store.experimentType === "sorting"; const [analyzing, setAnalyzing] = useState(false); const [msg, setMsg] = useState<{text:string;ok:boolean}|null>(null); const handleAnalyze = async () => { setAnalyzing(true); setMsg(null); const r = await callAgent("data_analyst","分析结果",()=>callDataAnalyst({hypothesis:store.hypothesis,experiment_results:store.experimentResult?.summary||{}})); store.set({aiAnalysis: r.ok ? r.data as any : {summary:isSort?"暴力法 O(n²) vs 分治法 O(n log n)":"暴力 O(n×m) vs 优化 O(n+m)",key_findings:["数据支持算法复杂度理论"],questions_for_student:["哪种策略最省操作？为什么？"]}});if(!r.ok)setMsg({text:r.error,ok:false});setAnalyzing(false);};const handleSave=async()=>{try{await saveAnalysis(store.sessionId!,store.studentAnalysis);}catch{}};return(<StageContainer step={6} title="分析结果" agent={msg} actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={()=>store.setStage("EXPERIMENT_RUNNING")}>← 上一步</button><button className="btn-primary" onClick={()=>{handleSave();store.setStage("REPORT_GENERATED");}} disabled={!store.studentAnalysis.trim()}>保存 → 总结报告</button></div>}>{store.experimentResult && <ChartPanel data={Object.entries(store.experimentResult.summary).map(([a,s]:any)=>({algorithm:a,swaps:s.avg_swaps??s.avg_comparisons,comparisons:s.avg_comparisons}))} xKey="algorithm" bars={isSort?[{key:"swaps",name:"交换次数",color:"#3b82f6"},{key:"comparisons",name:"比较次数",color:"#22c55e"}]:[{key:"comparisons",name:"比较次数",color:"#3b82f6"}]} />}<div className="flex items-center justify-between"><span className="text-sm text-gray-400">让 AI 帮你分析</span><button className="btn-secondary" onClick={handleAnalyze} disabled={analyzing}>{analyzing?"分析中...":"AI 分析"}</button></div>{store.aiAnalysis && <div className="card border-blue-100 bg-blue-50/30"><p className="font-medium text-gray-800 mb-3">📊 {store.aiAnalysis.summary}</p>{store.aiAnalysis.key_findings&&<ul className="mb-3 space-y-0.5">{store.aiAnalysis.key_findings.map((f:string,i:number)=><li key={i} className="text-sm text-gray-600">• {f}</li>)}</ul>}<div className="border-t border-blue-100 pt-3"><p className="text-sm font-medium text-gray-700 mb-1">思考</p>{store.aiAnalysis.questions_for_student?.map((q:string,i:number)=><p key={i} className="text-sm text-gray-500">{i+1}. {q}</p>)}</div></div>}<div className="card"><h2 className="font-semibold text-gray-700 mb-3">你的分析</h2><textarea className="w-full min-h-[100px] p-3 border rounded-lg text-sm resize-y" placeholder="写下发现..." value={store.studentAnalysis} onChange={e=>store.set({studentAnalysis:e.target.value})} /></div></StageContainer>);}
+function Stage6() { const store = useAlgoCompareStore(); const isSort = store.experimentType === "sorting"; const [analyzing, setAnalyzing] = useState(false); const [msg, setMsg] = useState<{text:string;ok:boolean}|null>(null); const handleAnalyze = async () => { setAnalyzing(true); setMsg(null); const r = await callAgent("data_analyst","分析结果",()=>callDataAnalyst({hypothesis:store.hypothesis,experiment_results:store.experimentResult?.summary||{}})); store.set({aiAnalysis: r.ok ? r.data as any : {summary:isSort?"暴力法 O(n²) vs 分治法 O(n log n)":"暴力 O(n×m) vs 优化 O(n+m)",key_findings:["数据支持算法复杂度理论"],questions_for_student:["哪种策略最省操作？为什么？"]}});if(!r.ok)setMsg({text:r.error,ok:false});setAnalyzing(false);};const handleSave=async()=>{try{await saveAnalysis(store.sessionId!,store.studentAnalysis);}catch{}};return(<StageContainer step={4} title="分析结果" agent={msg} actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={()=>store.setStage("EXPERIMENT_RUNNING")}>← 上一步</button><button className="btn-primary" onClick={()=>{handleSave();store.setStage("REPORT_GENERATED");}} disabled={!store.studentAnalysis.trim()}>保存 → 总结报告</button></div>}>{store.experimentResult && <ChartPanel data={Object.entries(store.experimentResult.summary).map(([a,s]:any)=>({algorithm:a,swaps:s.avg_swaps??s.avg_comparisons,comparisons:s.avg_comparisons}))} xKey="algorithm" bars={isSort?[{key:"swaps",name:"交换次数",color:"#3b82f6"},{key:"comparisons",name:"比较次数",color:"#22c55e"}]:[{key:"comparisons",name:"比较次数",color:"#3b82f6"}]} />}<div className="flex items-center justify-between"><span className="text-sm text-gray-400">让 AI 帮你分析</span><button className="btn-secondary" onClick={handleAnalyze} disabled={analyzing}>{analyzing?"分析中...":"AI 分析"}</button></div>{store.aiAnalysis && <div className="card border-blue-100 bg-blue-50/30"><p className="font-medium text-gray-800 mb-3">📊 {store.aiAnalysis.summary}</p>{store.aiAnalysis.key_findings&&<ul className="mb-3 space-y-0.5">{store.aiAnalysis.key_findings.map((f:string,i:number)=><li key={i} className="text-sm text-gray-600">• {f}</li>)}</ul>}<div className="border-t border-blue-100 pt-3"><p className="text-sm font-medium text-gray-700 mb-1">思考</p>{store.aiAnalysis.questions_for_student?.map((q:string,i:number)=><p key={i} className="text-sm text-gray-500">{i+1}. {q}</p>)}</div></div>}<div className="card"><h2 className="font-semibold text-gray-700 mb-3">你的分析</h2><textarea className="w-full min-h-[100px] p-3 border rounded-lg text-sm resize-y" placeholder="写下发现..." value={store.studentAnalysis} onChange={e=>store.set({studentAnalysis:e.target.value})} /></div></StageContainer>);}
 
-function Stage7() { const store = useAlgoCompareStore(); const navigate = useNavigate(); const isSort = store.experimentType === "sorting"; const [preview, setPreview] = useState(false); const md = buildReport(store); if (!store.reportMarkdown) store.set({ reportMarkdown: md }); return (<StageContainer step={7} title="总结报告" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={()=>store.setStage("RESULT_ANALYZED")}>← 上一步</button><button className="btn-primary" onClick={()=>{archiveSession({sessionId:store.sessionId,taskId:store.taskId,question:store.refinedQuestion||store.rawQuestion,hypothesis:store.hypothesis,algorithms:isSort?store.selectedSortingAlgos:store.selectedSearchAlgos,summary:store.experimentResult?.summary||null,analysis:store.studentAnalysis,reflection:{},report:store.reportMarkdown,review:{}});navigate("/archive");}}>完成 → 档案</button></div>}><div className="card"><div className="flex gap-2 mb-4"><button className={`btn-secondary text-sm ${!preview?"bg-gray-300":""}`} onClick={()=>setPreview(false)}>编辑</button><button className={`btn-secondary text-sm ${preview?"bg-gray-300":""}`} onClick={()=>setPreview(true)}>预览</button></div>{preview?<div className="min-h-[300px] border rounded-lg p-4 bg-white"><pre className="whitespace-pre-wrap font-sans text-gray-700 text-sm">{store.reportMarkdown}</pre></div>:<textarea className="w-full min-h-[300px] p-4 border rounded-lg font-mono text-sm resize-y" value={store.reportMarkdown} onChange={e=>store.set({reportMarkdown:e.target.value})} />}</div></StageContainer>);}
+function Stage7() { const store = useAlgoCompareStore(); const navigate = useNavigate(); const isSort = store.experimentType === "sorting"; const [preview, setPreview] = useState(false); const md = buildReport(store); if (!store.reportMarkdown) store.set({ reportMarkdown: md }); return (<StageContainer step={5} title="总结报告" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={()=>store.setStage("RESULT_ANALYZED")}>← 上一步</button><button className="btn-primary" onClick={()=>{archiveSession({sessionId:store.sessionId,taskId:store.taskId,question:store.refinedQuestion||store.rawQuestion,hypothesis:store.hypothesis,algorithms:isSort?store.selectedSortingAlgos:store.selectedSearchAlgos,summary:store.experimentResult?.summary||null,analysis:store.studentAnalysis,reflection:{},report:store.reportMarkdown,review:{}});navigate("/archive");}}>完成 → 档案</button></div>}><div className="card"><div className="flex gap-2 mb-4"><button className={`btn-secondary text-sm ${!preview?"bg-gray-300":""}`} onClick={()=>setPreview(false)}>编辑</button><button className={`btn-secondary text-sm ${preview?"bg-gray-300":""}`} onClick={()=>setPreview(true)}>预览</button></div>{preview?<div className="min-h-[300px] border rounded-lg p-4 bg-white"><pre className="whitespace-pre-wrap font-sans text-gray-700 text-sm">{store.reportMarkdown}</pre></div>:<textarea className="w-full min-h-[300px] p-4 border rounded-lg font-mono text-sm resize-y" value={store.reportMarkdown} onChange={e=>store.set({reportMarkdown:e.target.value})} />}</div></StageContainer>);}
 
 function buildReport(store: ReturnType<typeof useAlgoCompareStore.getState>): string {
   const isSort = store.experimentType === "sorting";

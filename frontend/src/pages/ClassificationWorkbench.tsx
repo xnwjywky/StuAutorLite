@@ -16,7 +16,7 @@ import {
   callMentor, callDataAnalyst, callReviewer, callGeneralLLM,
   hasAgentConfig, logAgentError,
   generateReflectionQuestions, getReflectionQuestions, saveReflectionAnswer,
-  saveQuestion, saveHypothesis, saveAnalysis, analyzeResults,
+  saveQuestion, saveAnalysis, analyzeResults,
   type ReflectionQuestion,
 } from "../api/service";
 import { archiveSession } from "./Archive";
@@ -26,8 +26,6 @@ import type { ResearchStage, ClassifierType, ClassifyMetricType, DataPattern } f
 // ═══════════════════════════════════════════════════════════
 const STEPS: { key: ResearchStage; label: string }[] = [
   { key: "TASK_SELECTED",       label: "选择研究任务" },
-  { key: "QUESTION_DEFINED",    label: "确定研究问题" },
-  { key: "HYPOTHESIS_WRITTEN",  label: "写出实验假设" },
   { key: "EXPERIMENT_DESIGNED", label: "设计实验" },
   { key: "EXPERIMENT_RUNNING",  label: "运行实验" },
   { key: "RESULT_ANALYZED",     label: "分析结果" },
@@ -42,11 +40,6 @@ const QUESTION_TEMPLATES = [
   "决策树是不是总比随机猜测好？",
   "KNN 的 K 值越大越好还是越小越好？",
   "圆形数据和分堆数据，哪个更难分类？",
-];
-const HYPOTHESIS_GUIDES = [
-  "我认为 ______ 在 ______ 数据上的准确率会更高，因为 ______。",
-  "当噪声增加时，我预测 ______ 的表现会 ______。",
-  "当数据量变化时，我认为 ______。",
 ];
 const REFLECTION_QUESTIONS = [
   "你的结果是否支持最初假设？为什么？",
@@ -126,7 +119,9 @@ export default function ClassificationWorkbench() {
           <h1 className="text-lg font-bold text-gray-800 mb-2">研究工作台</h1>
           <p className="text-xs text-gray-400 mb-4">图像分类算法研究</p>
           <FlowStepper steps={STEPS} current={store.currentStage} onStepClick={(s) => {
+            if (s === "TASK_SELECTED") { store.setStage("TASK_SELECTED"); return; }
             const stageKeys = STEPS.map(st => st.key);
+            if (!store.refinedQuestion) { store.setStage("TASK_SELECTED"); return; }
             if (stageKeys.indexOf(s) > stageKeys.indexOf("EXPERIMENT_DESIGNED") && !store.designCompleted) store.setStage("EXPERIMENT_DESIGNED");
             else store.setStage(s);
           }} />
@@ -140,27 +135,18 @@ export default function ClassificationWorkbench() {
 function StageRouter() {
   const stage = useClassificationStore((s) => s.currentStage);
   switch (stage) {
-    case "QUESTION_DEFINED":    return <Stage2 />;
-    case "HYPOTHESIS_WRITTEN":  return <Stage3 />;
     case "EXPERIMENT_DESIGNED": return <Stage4 />;
     case "EXPERIMENT_RUNNING":  return <Stage5 />;
     case "RESULT_ANALYZED":     return <Stage6 />;
     case "REFLECTION_COMPLETED":return <Stage7 />;
     case "REPORT_GENERATED":    return <Stage8 />;
     case "REVIEW_COMPLETED":    return <Stage9 />;
-    default: return (
-      <StageContainer step={1} title="选择研究任务">
-        <div className="card"><h3 className="font-semibold mb-2">🖼️ 图像分类算法研究</h3>
-          <p className="text-sm text-gray-500 mb-4">学习 KNN 和决策树如何对数据进行分类，研究数据量和噪声对分类效果的影响。</p>
-          <button className="btn-primary" onClick={() => useClassificationStore.getState().setStage("QUESTION_DEFINED")}>开始 → 确定研究问题</button>
-        </div>
-      </StageContainer>
-    );
+    default: return <TaskAndQuestion />;
   }
 }
 
-// ═══════ Stage 2 — 研究问题 ═══════
-function Stage2() {
+// ═══════ 统一任务选择 + 研究问题 + 流程预览 ═══════
+function TaskAndQuestion() {
   const store = useClassificationStore();
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
@@ -174,48 +160,85 @@ function Stage2() {
     else { store.set({ suggestedQuestions: classifyFallback(store.rawQuestion) }); setMsg({ text: result.error, ok: false }); }
     setLoading(false);
   };
-  const handleConfirm = async () => {
-    try { await saveQuestion({ session_id: store.sessionId!, raw_question: store.rawQuestion, refined_question: store.refinedQuestion, independent_variable: "噪声水平", dependent_variables: ["准确率", "F1 分数"], controlled_variables: ["数据量", "数据分布"] }); } catch {}
-    store.setStage("HYPOTHESIS_WRITTEN");
+
+  const handleSelectQuestion = async (q: string) => {
+    store.set({ refinedQuestion: q, rawQuestion: q });
+    try { await saveQuestion({ session_id: store.sessionId!, raw_question: q, refined_question: q, independent_variable: "噪声水平", dependent_variables: ["准确率", "F1 分数"], controlled_variables: ["数据量", "数据分布"] }); } catch {}
   };
 
+  const handleConfirm = () => {
+    store.set({ designCompleted: false, experimentResult: null });
+    store.setStage("EXPERIMENT_DESIGNED");
+  };
+
+  const selectedQ = store.refinedQuestion;
+  const flowItems = selectedQ ? buildFlowPreview(store) : null;
+  const hasSuggestions = store.suggestedQuestions.length > 0;
+
   return (
-    <StageContainer step={2} title="确定研究问题" agent={msg} actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("TASK_SELECTED")}>← 上一步</button><button className="btn-primary" onClick={handleConfirm} disabled={!store.refinedQuestion}>确认问题 → 写假设</button></div>}>
-      <div className="card"><h2 className="font-semibold text-gray-700 mb-3">可选问题模板</h2><div className="grid gap-2">{QUESTION_TEMPLATES.map((t) => <button key={t} onClick={() => store.set({ rawQuestion: t })} className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${store.rawQuestion === t ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}>{t}</button>)}</div></div>
-      <div className="card"><h2 className="font-semibold text-gray-700 mb-3">用你自己的话描述</h2><textarea className="w-full min-h-[80px] p-3 border rounded-lg text-sm resize-y focus:outline-none focus:ring-2 focus:ring-gray-300" placeholder="例如：KNN 是不是比决策树更准确？" value={store.rawQuestion} onChange={(e) => store.set({ rawQuestion: e.target.value })} /><button className="btn-primary mt-3" onClick={handleSuggest} disabled={loading || !store.rawQuestion.trim()}>{loading ? "生成中..." : "AI 帮我转化为研究问题"}</button></div>
-      {store.suggestedQuestions.length > 0 && <div className="card border-gray-200 bg-gray-50"><h2 className="font-semibold text-gray-700 mb-3">AI 建议的研究问题（点击选择）</h2><div className="space-y-2">{store.suggestedQuestions.map((q, i) => <button key={i} onClick={() => store.set({ refinedQuestion: q })} className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${store.refinedQuestion === q ? "bg-gray-900 text-white font-medium" : "bg-white text-gray-700 hover:bg-gray-100 border border-gray-100"}`}>{q}</button>)}</div></div>}
-      {store.refinedQuestion && <div className="card border-blue-200 bg-blue-50/50"><h3 className="font-semibold text-sm text-gray-700 mb-2">你的研究问题：</h3><p className="text-sm text-gray-800 font-medium">{store.refinedQuestion}</p></div>}
+    <StageContainer step={1} title="选择研究任务" agent={msg}>
+      <div className="card">
+        <h3 className="font-semibold mb-2">🖼️ 图像分类算法研究</h3>
+        <p className="text-sm text-gray-500">学习 KNN 和决策树如何对数据进行分类，研究数据量和噪声对分类效果的影响。</p>
+      </div>
+
+      <div className="card">
+        <h2 className="font-semibold text-gray-700 mb-3">选择或输入你想研究的问题</h2>
+        <div className="grid gap-2 mb-3">{QUESTION_TEMPLATES.map((t) => (
+          <button key={t} onClick={() => handleSelectQuestion(t)}
+            className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedQ === t ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}>{t}</button>
+        ))}</div>
+        <textarea className="w-full min-h-[60px] p-3 border rounded-lg text-sm resize-y" placeholder="或用你自己的话描述：KNN 是不是比决策树更准确？"
+          value={store.rawQuestion} onChange={(e) => store.set({ rawQuestion: e.target.value })} />
+        <button className="btn-primary mt-3" onClick={handleSuggest} disabled={loading || !store.rawQuestion.trim()}>{loading ? "生成中..." : "AI 帮我转化"}</button>
+        {hasSuggestions && (
+          <div className="mt-3 border-t border-gray-100 pt-3">
+            <h3 className="font-semibold text-gray-700 text-sm mb-2">AI 建议的研究问题（点击选择）</h3>
+            <div className="space-y-1">{store.suggestedQuestions.map((q, i) => (
+              <button key={i} onClick={() => handleSelectQuestion(q)}
+                className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedQ === q ? "bg-gray-900 text-white font-medium" : "bg-white text-gray-700 hover:bg-gray-100 border border-gray-100"}`}>{q}</button>
+            ))}</div>
+          </div>
+        )}
+      </div>
+
+      {selectedQ && (
+        <>
+          <div className="card border-blue-200 bg-blue-50/50">
+            <h3 className="font-semibold text-sm text-gray-700 mb-2">你的研究问题</h3>
+            <p className="text-sm text-gray-800 font-medium">{selectedQ}</p>
+          </div>
+          {flowItems && (
+            <div className="card border-green-100 bg-green-50/30">
+              <h3 className="font-semibold text-sm text-gray-700 mb-3">📋 研究流程预览</h3>
+              <div className="space-y-2">{flowItems.map((item, i) => (
+                <div key={i} className="flex gap-3 text-xs">
+                  <span className="w-24 text-gray-400 shrink-0">{item.stage}</span>
+                  <span className="text-gray-600">{item.output}</span>
+                </div>
+              ))}</div>
+            </div>
+          )}
+          <div className="flex justify-end">
+            <button className="btn-primary" onClick={handleConfirm}>确认 → 设计实验</button>
+          </div>
+        </>
+      )}
     </StageContainer>
   );
 }
 
-// ═══════ Stage 3 — 假设 ═══════
-function Stage3() {
-  const store = useClassificationStore();
-  const [saved, setSaved] = useState(false);
-  const [aiThinking, setAiThinking] = useState(false);
-  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
-
-  const handleGoNext = async () => { try { await saveHypothesis(store.sessionId!, store.hypothesis); } catch {} store.setStage("EXPERIMENT_DESIGNED"); };
-  const handleSaveAndAsk = async () => {
-    if (!store.hypothesis.trim()) return;
-    try { await saveHypothesis(store.sessionId!, store.hypothesis); } catch {} setSaved(true); setAiThinking(true);
-    const result = await callAgent("research_mentor", "实验假设", () => callMentor({ task: "图像分类", student_input: `学生对实验的预测：${store.hypothesis}`, grade_level: "beginner" }));
-    store.set({ aiHypothesisFeedback: result.ok ? ((result.data as any).suggested_questions || [])[0] || makeHypothesisFeedback(store.hypothesis) : makeHypothesisFeedback(store.hypothesis) });
-    if (!result.ok) setMsg({ text: result.error, ok: false });
-    setAiThinking(false);
-  };
-
-  return (
-    <StageContainer step={3} title="写出实验假设" agent={msg} actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("QUESTION_DEFINED")}>← 上一步</button><button className="btn-primary" onClick={handleGoNext} disabled={!store.hypothesis.trim()}>下一步 → 设计实验</button></div>}>
-      <div className="card"><h2 className="font-semibold text-gray-700 mb-3">句式引导</h2><div className="space-y-2">{HYPOTHESIS_GUIDES.map((g) => <button key={g} onClick={() => store.set({ hypothesis: store.hypothesis ? store.hypothesis + "\n" + g : g })} className="block w-full text-left px-3 py-2 bg-gray-50 rounded-lg text-sm text-gray-600 hover:bg-gray-100 transition-colors">{g}</button>)}</div></div>
-      <div className="card"><h2 className="font-semibold text-gray-700 mb-3">你的假设</h2><textarea className="w-full min-h-[120px] p-3 border rounded-lg text-sm resize-y focus:outline-none focus:ring-2 focus:ring-gray-300" placeholder="例如：我认为 KNN 在分堆数据上比决策树更准确，因为 KNN 会根据邻近点投票。" value={store.hypothesis} onChange={(e) => { store.set({ hypothesis: e.target.value }); setSaved(false); }} /><div className="flex items-center justify-between mt-3"><p className="text-sm text-gray-400">写清楚预测"谁更好"和"为什么"</p><button className="btn-secondary" onClick={handleSaveAndAsk} disabled={!store.hypothesis.trim() || aiThinking}>{aiThinking ? "分析中..." : saved ? "✓ 已保存" : "💬 让 AI 追问"}</button></div></div>
-      {aiThinking && <div className="card border-yellow-100 bg-yellow-50/30"><p className="text-sm text-gray-500 flex items-center gap-2"><span className="inline-block w-3 h-3 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />AI 正在分析你的假设，请稍候...</p></div>}
-      {store.aiHypothesisFeedback && !aiThinking && <div className="card border-yellow-200 bg-yellow-50"><h3 className="font-semibold text-sm text-gray-700 mb-2">AI 追问</h3><p className="text-sm text-gray-600">{store.aiHypothesisFeedback}</p></div>}
-    </StageContainer>
-  );
+function buildFlowPreview(store: ReturnType<typeof useClassificationStore.getState>) {
+  return [
+    { stage: "选择研究任务", output: "图像分类算法研究 — 对比不同分类器在 2D 数据上的表现" },
+    { stage: "设计实验", output: `选择分类器 / 数据量(${store.nSamples}) / 噪声(${(store.noiseLevels[0]*100).toFixed(0)}%) / 重复 ${store.numTrials} 次` },
+    { stage: "运行实验", output: `生成 2D 数据 → 分类器训练 → 渲染决策边界 → 分类测试数据` },
+    { stage: "分析结果", output: `对比准确率、精确率、召回率、F1 → 验证假设` },
+    { stage: "反思改进", output: "回答反思问题 → 发现实验局限 → 提出改进方案" },
+    { stage: "生成报告", output: "自动生成包含数据表格的 Markdown 报告" },
+    { stage: "获得审稿反馈", output: "AI 审稿人 6 维评分 + 修改建议" },
+  ];
 }
-
 // ═══════ Stage 4 — 设计实验 ═══════
 function Stage4() {
   const store = useClassificationStore();
@@ -226,7 +249,7 @@ function Stage4() {
   const depthLabel = (d: number) => d === 99 ? "不限" : String(d);
 
   return (
-    <StageContainer step={4} title="设计实验" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("HYPOTHESIS_WRITTEN")}>← 上一步</button><button className="btn-primary" onClick={() => { store.set({ designCompleted: true, experimentResult: null }); store.setStage("EXPERIMENT_RUNNING"); }}>下一步 → 运行实验</button></div>}>
+    <StageContainer step={4} title="设计实验" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("TASK_SELECTED")}>← 上一步</button><button className="btn-primary" onClick={() => { store.set({ designCompleted: true, experimentResult: null }); store.setStage("EXPERIMENT_RUNNING"); }}>下一步 → 运行实验</button></div>}>
       {/* 分类器选择 */}
       <div className="card"><h2 className="font-semibold text-gray-700 mb-3">我要比较的分类器 {store.selectedClassifiers.length === 0 && <span className="text-xs font-normal text-gray-400">（请至少选择一个）</span>}</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -533,11 +556,7 @@ function classifyFallback(input: string): string[] {
   qs.push("不同数据分布下，KNN 和决策树哪种分类器更稳定？", "增加噪声后，分类器的准确率会如何变化？");
   return qs.slice(0, 3);
 }
-function makeHypothesisFeedback(t: string): string {
-  if (!/因为|原因|由于/.test(t)) return "你的预测说了谁会更好，但能说说为什么吗？";
-  if (!/准确|精确|召回|F1|错误/.test(t)) return "你想用什么指标来判断'好'？是准确率更高还是更稳定？";
-  return "很好的假设！想一想：如果数据不是分堆的而是圆形的，你的预测还会成立吗？";
-}
+
 function buildClassifyReport(store: ReturnType<typeof useClassificationStore.getState>): string {
   const reflectionText = REFLECTION_QUESTIONS.map((q, i) => `**${q}**\n\n${store.reflectionAnswers[i] || "（待补充）"}`).join("\n\n");
   const summary = store.experimentResult ? Object.entries(store.experimentResult.summary).map(([a, s]: any) => `| ${a} | ${(s.avg_accuracy * 100).toFixed(0)}% | ${(s.avg_precision * 100).toFixed(0)}% | ${(s.avg_recall * 100).toFixed(0)}% | ${(s.avg_f1 * 100).toFixed(0)}% |`).join("\n") : "| - | - | - | - | - |";

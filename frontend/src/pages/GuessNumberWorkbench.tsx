@@ -11,7 +11,7 @@ import ChartPanel from "../components/ChartPanel";
 import AlgorithmCard from "../components/AlgorithmCard";
 import { useGuessNumberStore } from "../stores/guessNumberStore";
 import {
-  runGuessExperiment, saveQuestion, saveHypothesis, saveAnalysis,
+  runGuessExperiment, saveQuestion, saveAnalysis,
   callMentor, callDataAnalyst, hasAgentConfig, logAgentError,
 } from "../api/service";
 import { archiveSession } from "./Archive";
@@ -20,8 +20,6 @@ import type { ResearchStage, GuessStrategyType } from "../types";
 // ═══════════════════════════════════════════════════════════
 const STEPS: { key: ResearchStage; label: string }[] = [
   { key: "TASK_SELECTED",       label: "选择研究任务" },
-  { key: "QUESTION_DEFINED",    label: "确定研究问题" },
-  { key: "HYPOTHESIS_WRITTEN",  label: "写出实验假设" },
   { key: "EXPERIMENT_DESIGNED", label: "设计实验" },
   { key: "EXPERIMENT_RUNNING",  label: "运行实验" },
   { key: "RESULT_ANALYZED",     label: "分析结果" },
@@ -113,25 +111,16 @@ export default function GuessNumberWorkbench() {
 function StageRouter() {
   const stage = useGuessNumberStore((s) => s.currentStage);
   switch (stage) {
-    case "QUESTION_DEFINED":    return <Stage2 />;
-    case "HYPOTHESIS_WRITTEN":  return <Stage3 />;
     case "EXPERIMENT_DESIGNED": return <Stage4 />;
     case "EXPERIMENT_RUNNING":  return <Stage5 />;
     case "RESULT_ANALYZED":     return <Stage6 />;
     case "REPORT_GENERATED":    return <Stage7 />;
-    default: return (
-      <StageContainer step={1} title="选择研究任务">
-        <div className="card"><h3 className="font-semibold mb-2">🎯 猜数字策略研究</h3>
-          <p className="text-sm text-gray-500 mb-4">研究二分查找、随机猜测、线性扫描三种策略，理解"算法效率"的真正含义。</p>
-          <button className="btn-primary" onClick={() => useGuessNumberStore.getState().setStage("QUESTION_DEFINED")}>开始 → 确定研究问题</button>
-        </div>
-      </StageContainer>
-    );
+    default: return <TaskAndQuestion />;
   }
 }
 
-// ═══════ Stage 2 — 研究问题 ═══════
-function Stage2() {
+// ═══════ 统一任务选择 + 研究问题 + 流程预览 ═══════
+function TaskAndQuestion() {
   const store = useGuessNumberStore();
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
@@ -139,32 +128,89 @@ function Stage2() {
   const handleSuggest = async () => {
     if (!store.rawQuestion.trim()) return;
     setLoading(true); setMsg(null);
-    const result = await callAgent("research_mentor", "研究问题", () => callMentor({ task: "猜数字", student_input: store.rawQuestion, grade_level: "beginner" }));
-    if (result.ok) store.set({ suggestedQuestions: (result.data as any).suggested_questions || [QUESTION_TEMPLATES[0]] });
+    const result = await callAgent("research_mentor", "研究问题", () =>
+      callMentor({ task: "猜数字", student_input: store.rawQuestion, grade_level: "beginner" }));
+    if (result.ok) store.set({ suggestedQuestions: (result.data as any).suggested_questions || [] });
     else { store.set({ suggestedQuestions: [QUESTION_TEMPLATES[0]] }); setMsg({ text: result.error, ok: false }); }
     setLoading(false);
   };
 
+  const handleSelectQuestion = async (q: string) => {
+    store.set({ refinedQuestion: q, rawQuestion: q });
+    try { await saveQuestion({ session_id: store.sessionId!, raw_question: q, refined_question: q, independent_variable: "策略类型", dependent_variables: ["猜测次数"], controlled_variables: ["数字范围"] }); } catch {}
+  };
+
+  const handleConfirm = () => {
+    store.set({ designCompleted: false, experimentResult: null });
+    store.setStage("EXPERIMENT_DESIGNED");
+  };
+
+  const selectedQ = store.refinedQuestion;
+  const flowItems = selectedQ ? buildFlowPreview(store) : null;
+  const hasSuggestions = store.suggestedQuestions.length > 0;
+
   return (
-    <StageContainer step={2} title="确定研究问题" agent={msg} actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("TASK_SELECTED")}>← 上一步</button><button className="btn-primary" onClick={async () => { try { await saveQuestion({ session_id: store.sessionId!, raw_question: store.rawQuestion, refined_question: store.refinedQuestion, independent_variable: "策略类型", dependent_variables: ["猜测次数"], controlled_variables: ["数字范围"] }); } catch {} store.setStage("HYPOTHESIS_WRITTEN"); }} disabled={!store.refinedQuestion}>确认问题 → 写假设</button></div>}>
-      <div className="card"><h2 className="font-semibold text-gray-700 mb-3">可选问题模板</h2><div className="grid gap-2">{QUESTION_TEMPLATES.map((t) => <button key={t} onClick={() => store.set({ rawQuestion: t })} className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${store.rawQuestion === t ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}>{t}</button>)}</div></div>
-      <div className="card"><h2 className="font-semibold text-gray-700 mb-3">用你自己的话描述</h2><textarea className="w-full min-h-[80px] p-3 border rounded-lg text-sm resize-y focus:outline-none focus:ring-2 focus:ring-gray-300" placeholder="例如：二分查找是不是总比随机猜快？" value={store.rawQuestion} onChange={(e) => store.set({ rawQuestion: e.target.value })} /><button className="btn-primary mt-3" onClick={handleSuggest} disabled={loading || !store.rawQuestion.trim()}>{loading ? "生成中..." : "AI 帮我转化为研究问题"}</button></div>
-      {store.suggestedQuestions.length > 0 && <div className="card border-gray-200 bg-gray-50"><h2 className="font-semibold text-gray-700 mb-3">AI 建议的研究问题（点击选择）</h2><div className="space-y-2">{store.suggestedQuestions.map((q, i) => <button key={i} onClick={() => store.set({ refinedQuestion: q })} className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${store.refinedQuestion === q ? "bg-gray-900 text-white font-medium" : "bg-white text-gray-700 hover:bg-gray-100 border border-gray-100"}`}>{q}</button>)}</div></div>}
-      {store.refinedQuestion && <div className="card border-blue-200 bg-blue-50/50"><h3 className="font-semibold text-sm text-gray-700 mb-2">你的研究问题：</h3><p className="text-sm text-gray-800 font-medium">{store.refinedQuestion}</p></div>}
+    <StageContainer step={1} title="选择研究任务" agent={msg}>
+      <div className="card">
+        <h3 className="font-semibold mb-2">🎯 猜数字策略研究</h3>
+        <p className="text-sm text-gray-500">研究二分查找、随机猜测、线性扫描三种策略，理解算法效率的真正含义。</p>
+      </div>
+
+      <div className="card">
+        <h2 className="font-semibold text-gray-700 mb-3">选择或输入你想研究的问题</h2>
+        <div className="grid gap-2 mb-3">{QUESTION_TEMPLATES.map((t) => (
+          <button key={t} onClick={() => handleSelectQuestion(t)}
+            className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedQ === t ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}>{t}</button>
+        ))}</div>
+        <textarea className="w-full min-h-[60px] p-3 border rounded-lg text-sm resize-y" placeholder="或用你自己的话描述：二分查找是不是总比随机猜快？"
+          value={store.rawQuestion} onChange={(e) => store.set({ rawQuestion: e.target.value })} />
+        <button className="btn-primary mt-3" onClick={handleSuggest} disabled={loading || !store.rawQuestion.trim()}>{loading ? "生成中..." : "AI 帮我转化"}</button>
+        {hasSuggestions && (
+          <div className="mt-3 border-t border-gray-100 pt-3">
+            <h3 className="font-semibold text-gray-700 text-sm mb-2">AI 建议的研究问题（点击选择）</h3>
+            <div className="space-y-1">{store.suggestedQuestions.map((q, i) => (
+              <button key={i} onClick={() => handleSelectQuestion(q)}
+                className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedQ === q ? "bg-gray-900 text-white font-medium" : "bg-white text-gray-700 hover:bg-gray-100 border border-gray-100"}`}>{q}</button>
+            ))}</div>
+          </div>
+        )}
+      </div>
+
+      {selectedQ && (
+        <>
+          <div className="card border-blue-200 bg-blue-50/50">
+            <h3 className="font-semibold text-sm text-gray-700 mb-2">你的研究问题</h3>
+            <p className="text-sm text-gray-800 font-medium">{selectedQ}</p>
+          </div>
+          {flowItems && (
+            <div className="card border-green-100 bg-green-50/30">
+              <h3 className="font-semibold text-sm text-gray-700 mb-3">📋 研究流程预览</h3>
+              <div className="space-y-2">{flowItems.map((item, i) => (
+                <div key={i} className="flex gap-3 text-xs">
+                  <span className="w-24 text-gray-400 shrink-0">{item.stage}</span>
+                  <span className="text-gray-600">{item.output}</span>
+                </div>
+              ))}</div>
+            </div>
+          )}
+          <div className="flex justify-end">
+            <button className="btn-primary" onClick={handleConfirm}>确认 → 设计实验</button>
+          </div>
+        </>
+      )}
     </StageContainer>
   );
 }
 
-// ═══════ Stage 3 — 假设 ═══════
-function Stage3() {
-  const store = useGuessNumberStore();
-  return (
-    <StageContainer step={3} title="写出实验假设" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("QUESTION_DEFINED")}>← 上一步</button><button className="btn-primary" onClick={async () => { try { await saveHypothesis(store.sessionId!, store.hypothesis); } catch {} store.setStage("EXPERIMENT_DESIGNED"); }} disabled={!store.hypothesis.trim()}>下一步 → 设计实验</button></div>}>
-      <div className="card"><h2 className="font-semibold text-gray-700 mb-3">你的假设</h2><textarea className="w-full min-h-[120px] p-3 border rounded-lg text-sm resize-y focus:outline-none focus:ring-2 focus:ring-gray-300" placeholder="例如：我认为二分查找会比随机猜测少得多的次数找到目标，因为每次猜能排除一半。" value={store.hypothesis} onChange={(e) => store.set({ hypothesis: e.target.value })} /></div>
-    </StageContainer>
-  );
+function buildFlowPreview(store: ReturnType<typeof useGuessNumberStore.getState>) {
+  return [
+    { stage: "选择研究任务", output: "猜数字策略研究 — 对比不同猜数策略的效率" },
+    { stage: "设计实验", output: `选择策略 / 范围 ${store.numberLow}-${store.numberHigh} / 重复 ${store.numTrials} 次` },
+    { stage: "运行实验", output: `随机生成目标数 → 各策略猜测 → 记录每步猜测过程和次数` },
+    { stage: "分析结果", output: `对比平均猜测次数、最少/最多次数 → 验证假设` },
+    { stage: "总结报告", output: "自动生成包含数据表格的 Markdown 报告" },
+  ];
 }
-
 // ═══════ Stage 4 — 设计实验 ═══════
 function Stage4() {
   const store = useGuessNumberStore();
@@ -173,7 +219,7 @@ function Stage4() {
   const info = infoStr ? STRATEGY_INFO[infoStr] ?? null : null;
   const nameMap: Record<string, string> = { BINARY: "二分查找", RANDOM: "随机猜测", LINEAR: "线性扫描" };
   return (
-    <StageContainer step={4} title="设计实验" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("HYPOTHESIS_WRITTEN")}>← 上一步</button><button className="btn-primary" onClick={() => { store.set({ designCompleted: true, experimentResult: null }); store.setStage("EXPERIMENT_RUNNING"); }} disabled={store.selectedStrategies.length === 0}>下一步 → 运行实验</button></div>}>
+    <StageContainer step={4} title="设计实验" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("TASK_SELECTED")}>← 上一步</button><button className="btn-primary" onClick={() => { store.set({ designCompleted: true, experimentResult: null }); store.setStage("EXPERIMENT_RUNNING"); }} disabled={store.selectedStrategies.length === 0}>下一步 → 运行实验</button></div>}>
       <div className="card"><h2 className="font-semibold text-gray-700 mb-3">我要比较的策略 {store.selectedStrategies.length === 0 && <span className="text-xs font-normal text-gray-400">（请至少选择一个）</span>}</h2><div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{STRATEGIES.map((s) => <AlgorithmCard key={s.key} name={s.name} description={s.description} selected={store.selectedStrategies.includes(s.key)} onToggle={() => toggle(s)} />)}</div></div>
 
       {/* 策略原理 */}
