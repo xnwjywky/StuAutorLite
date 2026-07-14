@@ -16,7 +16,7 @@ import ChartPanel from "../components/ChartPanel";
 import AlgorithmCard, { ALGO_INFO } from "../components/AlgorithmCard";
 import { useWorkflowStore } from "../stores/workflowStore";
 import {
-  saveQuestion, saveHypothesis,
+  saveQuestion,
   runExperiment, analyzeResults, saveAnalysis,
   callMentor, callDataAnalyst, callReviewer, callGeneralLLM,
   hasAgentConfig, logAgentError,
@@ -146,12 +146,10 @@ function StageRouter() {
   }
 }
 
-// ═══════ 统一任务选择 + 研究问题 + 假设 + 流程预览 ═══════
+// ═══════ 统一任务选择 + 研究问题 + 流程预览 ═══════
 function TaskAndQuestion() {
   const store = useWorkflowStore();
   const [loading, setLoading] = useState(false);
-  const [explainLoading, setExplainLoading] = useState(false);
-  const [questionExplain, setQuestionExplain] = useState("");
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
   const handleSuggest = async () => {
@@ -164,28 +162,19 @@ function TaskAndQuestion() {
     setLoading(false);
   };
 
-  // 选中问题 → 设置 refinedQuestion + 异步加载问题解读 + 填写假设模板
   const handleSelectQuestion = async (q: string) => {
-    store.set({ refinedQuestion: q, hypothesis: makeHypothesisFromQuestion(q) });
-    setExplainLoading(true); setQuestionExplain("");
-    try { await saveQuestion({ session_id: store.sessionId!, raw_question: store.rawQuestion, refined_question: q, independent_variable: "障碍物比例", dependent_variables: ["搜索节点数","运行时间","成功率"], controlled_variables: ["迷宫大小","起点终点"] }); } catch {}
-    const result = await callAgent("通用LLM", "问题解释", () => callGeneralLLM({
-      prompt: `你是一个面向中小学生的科研学习助手。用通俗中文解释这个研究问题：\n\n${q}\n\n包括：1.在研究什么 2.相关算法是什么 3.如何实验 4.结果能说明什么。简短、适合中小学生。`,
-      messages: [{ role: "user", content: `请解释：${q}` }],
-    }));
-    if (result.ok) setQuestionExplain((result.data as any)?.content_markdown || (result.data as any)?.polished || makeLocalExplain(q));
-    else setQuestionExplain(makeLocalExplain(q));
-    setExplainLoading(false);
+    store.set({ refinedQuestion: q, rawQuestion: q });
+    try { await saveQuestion({ session_id: store.sessionId!, raw_question: q, refined_question: q, independent_variable: "障碍物比例", dependent_variables: ["搜索节点数","运行时间","成功率"], controlled_variables: ["迷宫大小","起点终点"] }); } catch {}
   };
 
-  const handleConfirm = async () => {
-    try { await saveHypothesis(store.sessionId!, store.hypothesis); } catch {}
+  const handleConfirm = () => {
     store.set({ designCompleted: false, experimentResult: null });
     store.setStage("EXPERIMENT_DESIGNED");
   };
 
   const selectedQ = store.refinedQuestion;
   const flowItems = selectedQ ? buildFlowPreview(store) : null;
+  const hasSuggestions = store.suggestedQuestions.length > 0;
 
   return (
     <StageContainer step={1} title="选择研究任务" agent={msg}>
@@ -198,20 +187,26 @@ function TaskAndQuestion() {
       <div className="card">
         <h2 className="font-semibold text-gray-700 mb-3">选择或输入你想研究的问题</h2>
         <div className="grid gap-2 mb-3">{QUESTION_TEMPLATES.map((t) => (
-          <button key={t} onClick={() => { store.set({ rawQuestion: t }); handleSelectQuestion(t); }}
+          <button key={t} onClick={() => handleSelectQuestion(t)}
             className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedQ === t ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}>{t}</button>
         ))}</div>
         <textarea className="w-full min-h-[60px] p-3 border rounded-lg text-sm resize-y" placeholder="或用你自己的话描述：A* 是不是一直比 BFS 好？"
           value={store.rawQuestion} onChange={(e) => store.set({ rawQuestion: e.target.value })} />
         <button className="btn-primary mt-3" onClick={handleSuggest} disabled={loading || !store.rawQuestion.trim()}>{loading ? "生成中..." : "AI 帮我转化"}</button>
-        {store.suggestedQuestions.length > 0 && !selectedQ && (
-          <div className="mt-3 border-t border-gray-100 pt-3"><h3 className="font-semibold text-gray-700 text-sm mb-2">AI 建议的研究问题（点击选择）</h3>
-            <div className="space-y-1">{store.suggestedQuestions.map((q, i) => <button key={i} onClick={() => handleSelectQuestion(q)}
-              className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedQ === q ? "bg-gray-900 text-white font-medium" : "bg-white text-gray-700 hover:bg-gray-100 border border-gray-100"}`}>{q}</button>)}</div></div>
+
+        {/* AI 建议列表 — 无论是否选中问题都展示 */}
+        {hasSuggestions && (
+          <div className="mt-3 border-t border-gray-100 pt-3">
+            <h3 className="font-semibold text-gray-700 text-sm mb-2">AI 建议的研究问题（点击选择）</h3>
+            <div className="space-y-1">{store.suggestedQuestions.map((q, i) => (
+              <button key={i} onClick={() => handleSelectQuestion(q)}
+                className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedQ === q ? "bg-gray-900 text-white font-medium" : "bg-white text-gray-700 hover:bg-gray-100 border border-gray-100"}`}>{q}</button>
+            ))}</div>
+          </div>
         )}
       </div>
 
-      {/* 选中问题后 → 流程预览 + 假设 + 确认 + 解读 */}
+      {/* 选中问题后 → 问题确认 + 流程预览 + 确认按钮 */}
       {selectedQ && (
         <>
           <div className="card border-blue-200 bg-blue-50/50">
@@ -219,34 +214,21 @@ function TaskAndQuestion() {
             <p className="text-sm text-gray-800 font-medium">{selectedQ}</p>
           </div>
 
-          {/* 流程预览 */}
+          {/* 流程预览 — 与左侧 7 步工作台对齐 */}
           {flowItems && (
             <div className="card border-green-100 bg-green-50/30">
               <h3 className="font-semibold text-sm text-gray-700 mb-3">📋 研究流程预览</h3>
               <div className="space-y-2">{flowItems.map((item, i) => (
                 <div key={i} className="flex gap-3 text-xs">
-                  <span className="w-14 text-gray-400 shrink-0">{item.stage}</span>
+                  <span className="w-24 text-gray-400 shrink-0">{item.stage}</span>
                   <span className="text-gray-600">{item.output}</span>
                 </div>
               ))}</div>
             </div>
           )}
 
-          {/* 假设内联 */}
-          <div className="card">
-            <h2 className="font-semibold text-gray-700 mb-3">你的假设</h2>
-            <p className="text-xs text-gray-400 mb-2">实验之前，先预测结果。以下为模板，你可以修改：</p>
-            <textarea className="w-full min-h-[80px] p-3 border rounded-lg text-sm resize-y" value={store.hypothesis} onChange={(e) => store.set({ hypothesis: e.target.value })} />
-          </div>
-
-          <div className="flex justify-between items-center">
-            <button className="btn-primary" onClick={handleConfirm} disabled={!store.hypothesis.trim()}>确认 → 设计实验</button>
-          </div>
-
-          {/* 问题解读（异步加载，最后显示） */}
-          <div className="card border-blue-100 bg-blue-50/30">
-            {explainLoading ? <p className="text-xs text-gray-400">AI 正在解读这个问题...</p> :
-             questionExplain ? <><h4 className="text-xs font-medium text-gray-600 mb-1">📖 问题解读</h4><div className="text-xs text-gray-500 leading-relaxed whitespace-pre-wrap">{questionExplain}</div></> : null}
+          <div className="flex justify-end">
+            <button className="btn-primary" onClick={handleConfirm}>确认 → 设计实验</button>
           </div>
         </>
       )}
@@ -254,33 +236,21 @@ function TaskAndQuestion() {
   );
 }
 
-// 流程预览构建器 — 根据选中的问题生成模板化输出
+// 流程预览构建器 — 与左侧 7 步工作台对齐
 function buildFlowPreview(_store: ReturnType<typeof useWorkflowStore.getState>) {
   const q = _store.refinedQuestion || _store.rawQuestion;
-  const algoNames = (q.match(/BFS|DFS|A\*|Random Walk|A\*|DIJKSTRA|GREEDY|BIDIRECTIONAL|IDDFS/g) || ["搜索算法"]).map((a: string) => a === "A*" ? "A*" : a);
+  const algoNames = (q.match(/BFS|DFS|A\*|Random Walk|DIJKSTRA|GREEDY|BIDIRECTIONAL|IDDFS/g) || ["搜索算法"])
+    .filter((a: string, i: number, arr: string[]) => arr.indexOf(a) === i)
+    .map((a: string) => a === "A*" ? "A*" : a);
   return [
-    { stage: "1️⃣ 选择任务", output: "迷宫寻路算法研究 — 对比不同算法在迷宫中的表现" },
-    { stage: "2️⃣ 研究问题", output: q },
-    { stage: "3️⃣ 实验假设", output: `我预测 ${algoNames.join("、")} 中，某个算法会表现更好，因为……` },
-    { stage: "4️⃣ 设计实验", output: `选择对比算法 / 迷宫大小 / 障碍物比例 / 重复次数` },
-    { stage: "5️⃣ 运行实验", output: `生成迷宫 → ${algoNames.join("、")} 分别寻路 → 记录路径/节点/耗时` },
-    { stage: "6️⃣ 分析结果", output: `对比成功率、路径长度、搜索节点数 → 验证假设` },
-    { stage: "7️⃣ 反思改进", output: "回答反思问题 → 发现实验局限 → 提出改进方案" },
-    { stage: "8️⃣ 研究报告", output: "自动生成包含数据表格的 Markdown 报告" },
-    { stage: "9️⃣ 审稿反馈", output: "AI 审稿人 6 维评分 + 修改建议" },
+    { stage: "选择研究任务", output: "迷宫寻路算法研究 — 对比不同算法在迷宫中的表现" },
+    { stage: "设计实验", output: `选择对比算法 / 迷宫大小(12×12) / 障碍物比例(20%) / 重复 5 次` },
+    { stage: "运行实验", output: `生成迷宫 → ${algoNames.join("、")} 分别寻路 → 记录路径/节点/耗时` },
+    { stage: "分析结果", output: `对比各算法成功率、路径长度、搜索节点数 → 验证假设` },
+    { stage: "反思改进", output: "回答反思问题 → 发现实验局限 → 提出改进方案" },
+    { stage: "生成报告", output: "自动生成包含数据表格的 Markdown 报告" },
+    { stage: "获得审稿反馈", output: "AI 审稿人 6 维评分 + 修改建议 + 审稿追问" },
   ];
-}
-
-function makeHypothesisFromQuestion(q: string): string {
-  for (const a of ["A*", "BFS", "DFS", "DIJKSTRA", "GREEDY", "BIDIRECTIONAL", "IDDFS", "RANDOM"]) {
-    if (q.includes(a)) return `我认为 ${a === "A*" ? "A*" : a} 在 ____ 方面会表现更好，因为 ____。`;
-  }
-  return "我认为 ______ 算法会表现更好，因为 ______。";
-}
-
-function makeLocalExplain(q: string): string {
-  const algos = (q.match(/BFS|DFS|A\*|Random Walk|DIJKSTRA|GREEDY|BIDIRECTIONAL|IDDFS/g) || ["搜索算法"]).join("、");
-  return `这个问题研究"${algos}"在迷宫寻路中的表现差异。你可以通过对比不同算法的搜索节点数、运行时间和成功率来找到答案。`;
 }
 
 // ═══════ Stage 4 — 设计实验（算法原理侧边显示、隐藏 AI 检查）═══════
