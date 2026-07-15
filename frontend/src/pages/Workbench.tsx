@@ -541,7 +541,7 @@ function Stage7() {
   const store = useWorkflowStore();
   const [questions, setQuestions] = useState<ReflectionQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<number, string>>({});
-  const [feedbacks, setFeedbacks] = useState<Record<number, string>>({});
+  const [, setFeedbacks] = useState<Record<number, string>>({});
   const [savingIds, setSavingIds] = useState<Set<number>>(new Set());
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -640,7 +640,7 @@ function Stage7() {
       {questions.map((q, i) => {
         const qid = q.id;
         const ans = qid < 0 ? (store.reflectionAnswers[-(qid + 1)] || "") : (answers[qid] || "");
-        const fb = feedbacks[qid] || "";        const saving = savingIds.has(qid);
+        const saving = savingIds.has(qid);
         return (
           <div key={qid} className="card">
             <div className="flex items-start gap-2 mb-2">
@@ -678,9 +678,6 @@ function Stage7() {
                         }
                       }}
                       className={`w-full text-left px-2.5 py-1.5 rounded text-[11px] leading-relaxed transition-all ${isActive ? "bg-blue-50 border border-blue-300" : "bg-gray-50 text-gray-500 hover:bg-blue-50/50 border border-gray-100"}`}>
-                      <span className={`inline-block px-1.5 py-0.5 rounded-full text-[9px] font-medium mr-2 ${t.score >= 5 ? "bg-green-100 text-green-700" : t.score >= 3 ? "bg-yellow-100 text-yellow-700" : "bg-gray-200 text-gray-600"}`}>
-                        {t.level} ★{t.score}
-                      </span>
                       {t.text.length > 80 ? t.text.slice(0, 80) + "…" : t.text}
                     </button>
                   );
@@ -688,7 +685,6 @@ function Stage7() {
               </div>
             )}
             {saving && <p className="text-xs text-gray-400 mt-1 flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 border border-blue-400 border-t-transparent rounded-full animate-spin" />处理中...</p>}
-            {fb && <p className="text-xs text-blue-600 mt-2 p-2 bg-blue-50 rounded-lg">💡 {fb}</p>}
           </div>
         );
       })}

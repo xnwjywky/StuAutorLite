@@ -427,7 +427,6 @@ function Stage7() {
   const store = useClassificationStore();
   const [questions, setQuestions] = useState<ReflectionQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<number, string>>({});
-  const [feedbacks, setFeedbacks] = useState<Record<number, string>>({});
   const [loaded, setLoaded] = useState(false);
 
   const loadQuestions = async () => {
@@ -439,9 +438,9 @@ function Stage7() {
       }
       if (qs && qs.length > 0) {
         setQuestions(qs);
-        const am: Record<number, string> = {}; const fm: Record<number, string> = {};
-        for (const q of qs) { if (q.student_answer) am[q.id] = q.student_answer; if (q.ai_feedback) fm[q.id] = q.ai_feedback; }
-        setAnswers(am); setFeedbacks(fm);
+        const am: Record<number, string> = {};
+        for (const q of qs) { if (q.student_answer) am[q.id] = q.student_answer; }
+        setAnswers(am);
         const storeAnswers: Record<number, string> = {}; qs.forEach((q, i) => { storeAnswers[i] = q.student_answer || ""; }); store.set({ reflectionAnswers: storeAnswers });
       }
     } catch {
@@ -454,7 +453,7 @@ function Stage7() {
   const handleBlur = async (qid: number, text: string) => {
     if (!text.trim()) return;
     const storeAnswers: Record<number, string> = {}; questions.forEach((q, i) => { storeAnswers[i] = q.id === qid ? text : (qid < 0 ? store.reflectionAnswers[-(qid + 1)] || "" : answers[q.id] || ""); }); store.set({ reflectionAnswers: storeAnswers });
-    if (qid > 0) { try { const updated = await saveReflectionAnswer(qid, text); setFeedbacks((f) => ({ ...f, [qid]: updated.ai_feedback || "" })); } catch {} }
+    if (qid > 0) { try { await saveReflectionAnswer(qid, text); } catch {} }
   };
 
   const allAnswered = questions.length > 0 && questions.every((q) => { const a = q.id < 0 ? store.reflectionAnswers[-(q.id + 1)] : answers[q.id]; return a?.trim(); });
@@ -463,7 +462,7 @@ function Stage7() {
     <StageContainer step={7} title="反思与改进" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("RESULT_ANALYZED")}>← 上一步</button><button className="btn-primary" onClick={() => store.setStage("REPORT_GENERATED")} disabled={!allAnswered}>完成反思 → 生成报告</button></div>}>
       {!loaded && <div className="card text-center py-8"><p className="text-gray-400">正在生成反思问题...</p></div>}
       {questions.map((q, i) => {
-        const qid = q.id; const ans = qid < 0 ? (store.reflectionAnswers[-(qid + 1)] || "") : (answers[qid] || ""); const fb = feedbacks[qid] || "";
+        const qid = q.id; const ans = qid < 0 ? (store.reflectionAnswers[-(qid + 1)] || "") : (answers[qid] || "");
         return (
           <div key={qid} className="card">
             <h3 className="font-semibold text-gray-700 text-sm mb-2">{i + 1}. {q.question_text}</h3>
@@ -477,10 +476,8 @@ function Stage7() {
                   const isActive = ans === t.text;
                   return (<button key={j} onClick={() => { if (qid < 0) store.set({ reflectionAnswers: { ...store.reflectionAnswers, [-(qid + 1)]: t.text } }); else { setAnswers((a) => ({ ...a, [qid]: t.text })); handleBlur(qid, t.text); } }}
                     className={`w-full text-left px-2.5 py-1.5 rounded text-[11px] leading-relaxed transition-all ${isActive ? "bg-blue-50 border border-blue-300" : "bg-gray-50 text-gray-500 hover:bg-blue-50/50 border border-gray-100"}`}>
-                    <span className={`inline-block px-1.5 py-0.5 rounded-full text-[9px] font-medium mr-2 ${t.score >= 5 ? "bg-green-100 text-green-700" : t.score >= 3 ? "bg-yellow-100 text-yellow-700" : "bg-gray-200 text-gray-600"}`}>{t.level} ★{t.score}</span>
                     {t.text.length > 80 ? t.text.slice(0, 80) + "…" : t.text}</button>);
                 })}</div>)}
-            {fb && <p className="text-xs text-blue-600 mt-2 p-2 bg-blue-50 rounded-lg">💡 {fb}</p>}
           </div>
         );
       })}
