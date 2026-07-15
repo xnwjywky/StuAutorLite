@@ -31,6 +31,7 @@ cd .. && python run_tests.py
 | 🖼️ 图像分类 | KNN / 决策树 / 随机基线 | `/workbench-classify/:id` | 决策边界动画 + 2D 数据 |
 | 🎯 猜数字 | 二分查找 / 随机 / 线性扫描 | `/workbench-guess/:id` | 步进式猜测动画 |
 | 📈 可视化算法 | 冒泡/选择/归并/快排 + 暴力/KMP/BM/RK | `/workbench-sort/:id` | 排序柱状动画 + 字符串搜索 |
+| 👁️ 图形识别 | 模板匹配 / 像素KNN / 特征分类 / 随机 | `/workbench-shape/:id` | 16×16 像素图形 + ShapeGrid 动画 |
 
 所有实验共享 9 阶段研究流程（问题→假设→设计→运行→分析→反思→报告→审稿），配有 AI Agent 引导。
 
@@ -53,7 +54,7 @@ cd .. && python run_tests.py
 | 后端 | Python 3.12 + FastAPI + SQLAlchemy + Pydantic |
 | 数据库 | SQLite |
 | 算法 | 纯 Python（无 NumPy/sklearn 依赖） |
-| 测试 | pytest 97 用例 + vitest 63 用例 |
+| 测试 | pytest 106 用例 + vitest 67 用例 |
 
 ## 项目结构
 
@@ -66,7 +67,8 @@ cd .. && python run_tests.py
 │   │   │   ├── classification/ # 分类器 + 2D 数据生成
 │   │   │   ├── guessnumber/   # 猜数字策略
 │   │   │   ├── sorting/       # 排序算法
-│   │   │   └── stringsearch/  # 字符串搜索算法
+│   │   │   ├── stringsearch/  # 字符串搜索算法
+│   │   │   └── shaperecog/    # 图形识别算法
 │   │   ├── agents/            # 6 AI Agent
 │   │   ├── models/            # 数据库 ORM + Pydantic Schema
 │   │   └── services/          # AgentGateway / ReportGenerator
