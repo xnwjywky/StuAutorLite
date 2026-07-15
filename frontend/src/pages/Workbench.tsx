@@ -650,7 +650,7 @@ function Stage7() {
             <textarea
               className="w-full p-3 border rounded-lg text-sm resize-y focus:outline-none focus:ring-2 focus:ring-gray-300"
               rows={3}
-              placeholder="写下你的想法..."
+              placeholder="写下你的想法，或点击下方模版快速填写..."
               value={ans}
               onChange={(e) => {
                 if (qid < 0) {
@@ -661,6 +661,32 @@ function Stage7() {
               }}
               onBlur={(e) => handleBlur(qid, e.target.value)}
             />
+            {/* 模板回答按钮 */}
+            {q.template_answers && q.template_answers.length > 0 && (
+              <div className="mt-2 space-y-1">
+                <p className="text-[10px] text-gray-400">📝 参考模版（点击填充，含科研能力评分）：</p>
+                {q.template_answers.map((t: any, j: number) => {
+                  const isActive = ans === t.text;
+                  return (
+                    <button key={j}
+                      onClick={() => {
+                        if (qid < 0) {
+                          store.set({ reflectionAnswers: { ...store.reflectionAnswers, [-(qid + 1)]: t.text } });
+                        } else {
+                          setAnswers((a) => ({ ...a, [qid]: t.text }));
+                          handleBlur(qid, t.text);
+                        }
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded text-[11px] leading-relaxed transition-all ${isActive ? "bg-blue-50 border border-blue-300" : "bg-gray-50 text-gray-500 hover:bg-blue-50/50 border border-gray-100"}`}>
+                      <span className={`inline-block px-1.5 py-0.5 rounded-full text-[9px] font-medium mr-2 ${t.score >= 5 ? "bg-green-100 text-green-700" : t.score >= 3 ? "bg-yellow-100 text-yellow-700" : "bg-gray-200 text-gray-600"}`}>
+                        {t.level} ★{t.score}
+                      </span>
+                      {t.text.length > 80 ? t.text.slice(0, 80) + "…" : t.text}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
             {saving && <p className="text-xs text-gray-400 mt-1 flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 border border-blue-400 border-t-transparent rounded-full animate-spin" />处理中...</p>}
             {fb && <p className="text-xs text-blue-600 mt-2 p-2 bg-blue-50 rounded-lg">💡 {fb}</p>}
           </div>

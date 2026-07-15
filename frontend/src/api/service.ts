@@ -165,7 +165,10 @@ export function hasAgentConfig(): boolean {
 export interface ReflectionQuestion {
   id: number; session_id: number; question_text: string;
   category: string; category_label: string; sort_order: number;
-  is_selected: boolean; student_answer: string; ai_feedback: string; created_at: string;
+  is_selected: boolean; student_answer: string; ai_feedback: string;
+  template_answers?: { text: string; score: number; level: string }[];
+  reflection_score?: number;
+  created_at: string;
 }
 
 export async function generateReflectionQuestions(sessionId: number): Promise<{ questions: ReflectionQuestion[]; total: number }> {

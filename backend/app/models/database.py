@@ -158,6 +158,8 @@ class ReflectionQuestion(Base):
     is_selected = Column(Integer, default=0)              # 是否选中展示给学生 (0/1)
     student_answer = Column(Text, default="")             # 学生回答
     ai_feedback = Column(Text, default="")                # AI 启发式反馈
+    template_answers = Column(Text, default="")           # JSON: [{"text":"...","score":1.0,"level":"初步"},...]
+    reflection_score = Column(Float, default=0)           # 该题的科研能力得分 (0-5)
     created_at = Column(DateTime, server_default=func.now())
 
     session = relationship("Session", back_populates="reflections")
