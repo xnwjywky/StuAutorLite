@@ -262,3 +262,18 @@ export interface StringSearchResult {
   summary: Record<string, { avg_comparisons: number; avg_matches: number; avg_runtime_ms: number; count: number }>;
   runs: StringSearchRun[];
 }
+
+// ========== 图形识别实验 ==========
+export type ShapeRecogAlgorithmType = "TEMPLATE" | "PIXEL_KNN" | "FEATURE" | "RANDOM";
+
+export interface ShapeRecogRun {
+  algorithm: string; n_samples: number; noise_level: number; trial: number;
+  accuracy: number; correct: number; total: number; runtime_ms: number;
+  test_grids: number[][][]; test_labels: string[]; predictions: string[];
+}
+
+export interface ShapeRecogResult {
+  experiment_batch_id: string; status: string; total_runs: number;
+  summary: Record<string, { avg_accuracy: number; min_accuracy: number; max_accuracy: number; avg_runtime_ms: number; count: number }>;
+  runs: ShapeRecogRun[];
+}

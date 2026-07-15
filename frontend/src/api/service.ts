@@ -223,3 +223,10 @@ export async function runStringSearchExperiment(data: {
 }): Promise<import("../types").StringSearchResult & { runs: any[] }> {
   return apiClient.post("/api/stringsearch/run", data) as Promise<any>;
 }
+
+// ── 图形识别实验 ──────────────────────────────────────────
+export async function runShapeRecogExperiment(data: {
+  session_id: number; algorithms: string[]; settings: Record<string, unknown>;
+}): Promise<import("../types").ShapeRecogResult & { runs: any[] }> {
+  return apiClient.post("/api/shaperecog/run", data) as Promise<any>;
+}

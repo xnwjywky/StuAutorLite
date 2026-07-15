@@ -28,9 +28,9 @@ const TASKS: TaskCard[] = [
   { id: "simple_classification", name: "简单分类", description: "学习 KNN 和决策树，让计算机自动识别不同物品",
     difficulty: "入门", icon: "📊", gradient: "from-orange-500 to-amber-600",
     concepts: ["KNN", "决策树", "分类任务"], available: true },
-  { id: "shape_recognition", name: "图形识别", description: "训练模型识别手写数字和几何图形，理解 AI 如何'看'世界",
+  { id: "shape_recognition", name: "图形识别", description: "识别像素化圆形/正方形/三角形，对比模板匹配、KNN 和特征提取",
     difficulty: "进阶", icon: "👁️", gradient: "from-sky-500 to-blue-600",
-    concepts: ["图像识别", "特征提取", "模型训练"], available: false },
+    concepts: ["模板匹配", "像素KNN", "特征提取"], available: true },
   { id: "robot_obstacle", name: "机器人避障", description: "让虚拟机器人在障碍物中自主导航，学会避开陷阱",
     difficulty: "进阶", icon: "🤖", gradient: "from-rose-500 to-pink-600",
     concepts: ["路径规划", "传感器", "自主导航"], available: false },
@@ -60,6 +60,8 @@ export default function TaskSelect() {
         ? `/workbench-guess/${sid}`
         : taskId === "visual_algo_compare"
         ? `/workbench-sort/${sid}`
+        : taskId === "shape_recognition"
+        ? `/workbench-shape/${sid}`
         : `/workbench/${sid}`;
       navigate(route);
     } catch {
