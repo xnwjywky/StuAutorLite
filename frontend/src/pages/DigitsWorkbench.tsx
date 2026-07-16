@@ -1,6 +1,6 @@
 /**
- * 图形识别研究工作台 — 7 阶段，识别圆形/正方形/三角形
- * 复用: Layout, FlowStepper, StageContainer, ChartPanel, AlgorithmCard
+ * 手写数字识别研究工作台 — 7 阶段，识别 0-9 手写数字
+ * 复用: Layout, FlowStepper, StageContainer, ChartPanel, AlgorithmCard, ShapeGrid
  */
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
@@ -10,10 +10,10 @@ import StageContainer from "../components/StageContainer";
 import ChartPanel from "../components/ChartPanel";
 import AlgorithmCard from "../components/AlgorithmCard";
 import ShapeGrid from "../components/ShapeGrid";
-import { useShapeRecogStore } from "../stores/shapeRecogStore";
-import { runShapeRecogExperiment, saveQuestion, saveAnalysis, callMentor, callDataAnalyst, hasAgentConfig, logAgentError } from "../api/service";
+import { useDigitsStore } from "../stores/digitsStore";
+import { runDigitsExperiment, saveQuestion, saveAnalysis, callMentor, callDataAnalyst, hasAgentConfig, logAgentError } from "../api/service";
 import { archiveSession } from "./Archive";
-import type { ResearchStage, ShapeRecogAlgorithmType } from "../types";
+import type { ResearchStage, DigitRecogAlgorithmType } from "../types";
 
 const STEPS: { key: ResearchStage; label: string }[] = [
   { key: "TASK_SELECTED",       label: "选择研究任务" },
@@ -24,29 +24,29 @@ const STEPS: { key: ResearchStage; label: string }[] = [
 ];
 
 const QUESTION_TEMPLATES = [
-  "增加噪声后，哪种识别方法最稳定？",
-  "模板匹配和像素 KNN 谁更准确？",
-  "数字越大，识别率一定越高吗？",
-  "只看特征的识别方法有什么优缺点？",
+  "数据量变少时，哪个模型更稳定？",
+  "加入噪声后，模型准确率如何变化？",
+  "训练轮数越多，效果一定越好吗？",
+  "简单模型和深度模型在手写数字识别上有什么区别？",
 ];
 
-const ALGORITHMS: { key: ShapeRecogAlgorithmType; name: string; description: string; pros: string[]; cons: string[]; category: string }[] = [
-  { key: "TEMPLATE", name: "模板匹配", description: "跟标准模板逐一比对", pros: ["直观易懂","最快"], cons: ["需要干净模板","对噪声敏感"], category: "直接匹配" },
+const ALGORITHMS: { key: DigitRecogAlgorithmType; name: string; description: string; pros: string[]; cons: string[]; category: string }[] = [
+  { key: "TEMPLATE", name: "模板匹配", description: "跟标准数字模板逐一比对", pros: ["直观易懂","最快"], cons: ["需要干净模板","对噪声敏感"], category: "直接匹配" },
   { key: "PIXEL_KNN", name: "像素KNN", description: "将图像像素铺平成向量比较", pros: ["实现简单","无需预处理"], cons: ["计算量大","高维比较慢"], category: "像素级" },
-  { key: "FEATURE", name: "特征分类", description: "提取几何特征再分类", pros: ["特征有物理含义","对旋转平移鲁棒"], cons: ["特征设计难","可能丢失信息"], category: "特征级" },
-  { key: "DECISION_TREE", name: "决策树", description: "按像素值逐层分裂判断", pros: ["可解释性强","训练快"], cons: ["容易过拟合","对噪声敏感"], category: "树模型" },
-  { key: "MLP", name: "MLP", description: "单隐藏层神经网络学习非线性特征", pros: ["自动学特征","表达能力强"], cons: ["训练时间长","需要调参"], category: "神经网络" },
-  { key: "CNN", name: "小型CNN", description: "卷积+池化提取空间局部特征", pros: ["利用空间结构","抗平移"], cons: ["计算量较大","需要较多数据"], category: "神经网络" },
-  { key: "RANDOM", name: "随机基线", description: "随便猜，用作对比 baseline", pros: ["简单直观","体现算法价值"], cons: ["准确率低"], category: "baseline" },
+  { key: "FEATURE", name: "特征分类", description: "提取几何特征再分类", pros: ["特征有物理含义","维度低"], cons: ["特征设计难","对数字帮助有限"], category: "特征级" },
+  { key: "DECISION_TREE", name: "决策树", description: "按像素值逐层分裂判断", pros: ["可解释性强","训练快"], cons: ["容易过拟合"], category: "树模型" },
+  { key: "MLP", name: "MLP", description: "单隐藏层神经网络自动学特征", pros: ["自动学特征","表达能力强"], cons: ["训练时间长"], category: "神经网络" },
+  { key: "CNN", name: "小型CNN", description: "卷积+池化提取空间局部特征", pros: ["利用空间结构","抗平移","最先进"], cons: ["计算量较大"], category: "神经网络" },
+  { key: "RANDOM", name: "随机基线", description: "随便猜，用作对比 baseline", pros: ["简单直观"], cons: ["准确率约10%"], category: "baseline" },
 ];
 const ALGO_INFO: Record<string, { explanation: string; analogy: string; key_points: string[] }> = {
-  TEMPLATE: { explanation: "模板匹配把每个测试图形和已有的标准模板（干净的圆形、正方形、三角形）逐一比对，看哪个最像就判为哪类。简单直接但依赖模板质量。", analogy: "就像你拿一张照片和标准证件照对比——跟谁长得最像就是谁。", key_points: ["逐像素比对","选择匹配度最高的","O(n) 比较"] },
-  PIXEL_KNN: { explanation: "像素KNN把 16×16 的图形拉平成 256 维向量，用 KNN 找最近的训练样本来投票分类。比模板匹配更灵活但计算量大。", analogy: "就像认出一个人——不是比照片，而是记住见过的所有样本，找最像的几个来投票。", key_points: ["展开像素为向量","欧氏距离最近邻","K=3 投票"] },
-  FEATURE: { explanation: "特征分类先提取图形的几何特征（边缘像素数、宽高比、对称性等），只比较这些特征值，维度从 256 降到了 5，更快但可能丢失细节。", analogy: "就像你描述一个人「高个子、圆脸、眼睛大」而不是看照片——足够分辨很多情况，但细节可能不准。", key_points: ["提取几何特征","维度大幅降低","更快但可能丢信息"] },
-  DECISION_TREE: { explanation: "决策树把 256 个像素看作 256 个问题，逐个提问「这个像素亮不亮？」来分裂数据，直到确定形状类别。可解释性很强。", analogy: "就像玩「20 个问题」游戏——通过一系列是/否问题逐步缩小可能性，最终猜出答案。", key_points: ["像素值作为特征","Gini不纯度分裂","max_depth=8 防止过拟合"] },
-  MLP: { explanation: "MLP 用一层 64 个隐藏神经元自动学习像素组合模式，通过反向传播优化权重。能捕捉非线性关系但训练较慢。", analogy: "就像大脑的神经元网络——每个神经元看一部分像素，组合起来做出判断。", key_points: ["256→64→n_classes","ReLU + Softmax","交叉熵损失 + SGD"] },
-  CNN: { explanation: "小型 CNN 用 3×3 卷积核扫描图像提取局部特征（如边、角），池化降维后全连接分类。利用了图像的空间结构。", analogy: "就像用放大镜逐块观察图像——先看局部纹理，再综合判断整体形状。", key_points: ["3×3 卷积 (4 filters)","ReLU + 2×2 MaxPool","FC → Softmax"] },
-  RANDOM: { explanation: "随机基线不做任何识别——纯粹随机猜一个类别。用来和上面的方法对比，看看到底好多少。", analogy: "就像闭着眼睛猜——3 选 1 大概对 1/3。", key_points: ["不做任何识别","随机输出","作为 baseline 对比"] },
+  PIXEL_KNN: { explanation: "像素KNN把 16×16 的数字图像拉平成 256 维向量，用 KNN 找最近的训练样本来投票分类。", analogy: "就像认出一个人——记住见过的所有样本，找最像的几个来投票。", key_points: ["展开像素为向量","欧氏距离最近邻","K=3 投票"] },
+  DECISION_TREE: { explanation: "决策树把 256 个像素看作问题，逐个提问来分裂数据，直到确定数字类别。可解释性很强。", analogy: "就像玩「20 个问题」——通过一系列是/否问题逐步缩小可能性。", key_points: ["像素值作为特征","Gini不纯度分裂","max_depth=8"] },
+  MLP: { explanation: "MLP 用 64 个隐藏神经元自动学习像素组合模式，通过反向传播优化。能捕捉非线性关系。", analogy: "就像大脑的神经元网络——每个神经元看一部分像素，组合起来做判断。", key_points: ["256→64→10","ReLU + Softmax","SGD 30 epochs"] },
+  CNN: { explanation: "小型 CNN 用 3×3 卷积核扫描图像提取局部特征，池化降维后全连接分类。利用了图像空间结构。", analogy: "就像用放大镜逐块观察——先看局部笔画纹理，再综合判断是哪个数字。", key_points: ["3×3 卷积 (4 filters)","ReLU + 2×2 MaxPool","FC → 10类 Softmax"] },
+  TEMPLATE: { explanation: "模板匹配把测试数字和 0-9 的标准模板逐一比对，选最像的。简单直接但对书写风格敏感。", analogy: "就像和标准字帖对比——谁写得最像标准答案就是谁。", key_points: ["逐像素比对","选匹配度最高的","10 个模板"] },
+  FEATURE: { explanation: "特征分类提取几何特征（像素数、宽高比、对称性等），降维后分类。对数字识别帮助有限。", analogy: "就像描述数字特征——「有个圆圈」「有竖线」等。", key_points: ["提取几何特征","维度降低","速度快"] },
+  RANDOM: { explanation: "随机基线不做任何识别——纯粹随机猜一个数字。用来和上面的方法对比。", analogy: "就像闭着眼睛猜——10 选 1 大概对 10%。", key_points: ["不做任何识别","随机输出","作为 baseline"] },
 };
 const NOISE_LEVELS = [0.0, 0.05, 0.1, 0.2];
 const SAMPLE_SIZES = [100, 200, 400];
@@ -59,11 +59,11 @@ async function callAgent(agentName: string, stage: string, fn: () => Promise<{ r
   catch (e: any) { logAgentError(agentName, stage, e?.message || String(e)); return { ok: false, error: e?.message || String(e), agentName }; }
 }
 
-const SHAPE_NAMES: Record<string, string> = { circle: "圆形", square: "正方形", triangle: "三角形" };
+const DIGIT_NAMES: Record<number, string> = { 0: "0", 1: "1", 2: "2", 3: "3", 4: "4", 5: "5", 6: "6", 7: "7", 8: "8", 9: "9" };
 
-export default function ShapeRecogWorkbench() {
+export default function DigitsWorkbench() {
   const { sessionId } = useParams<{ sessionId: string }>();
-  const store = useShapeRecogStore();
+  const store = useDigitsStore();
   useEffect(() => { const id = Number(sessionId); store.init(Number.isNaN(id) ? -1 : id); }, [sessionId]);
   if (store.sessionId === null) return null;
   return (
@@ -71,7 +71,7 @@ export default function ShapeRecogWorkbench() {
       <div className="flex" style={{ minHeight: "calc(100vh - 56px)" }}>
         <aside className="w-64 bg-white border-r border-gray-200 p-4 flex-shrink-0">
           <h1 className="text-lg font-bold text-gray-800 mb-2">研究工作台</h1>
-          <p className="text-xs text-gray-400 mb-4">图形识别算法研究</p>
+          <p className="text-xs text-gray-400 mb-4">手写数字识别算法研究</p>
           <FlowStepper steps={STEPS} current={store.currentStage} onStepClick={(s) => {
             if (s === "TASK_SELECTED") { store.setStage("TASK_SELECTED"); return; }
             if (!store.refinedQuestion) { store.setStage("TASK_SELECTED"); return; }
@@ -87,7 +87,7 @@ export default function ShapeRecogWorkbench() {
 }
 
 function StageRouter() {
-  const stage = useShapeRecogStore((s) => s.currentStage);
+  const stage = useDigitsStore((s) => s.currentStage);
   switch (stage) {
     case "EXPERIMENT_DESIGNED": return <Stage4 />; case "EXPERIMENT_RUNNING": return <Stage5 />;
     case "RESULT_ANALYZED": return <Stage6 />; case "REPORT_GENERATED": return <Stage7 />;
@@ -96,14 +96,14 @@ function StageRouter() {
 }
 
 function TaskAndQuestion() {
-  const store = useShapeRecogStore();
+  const store = useDigitsStore();
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
   const handleSuggest = async () => {
     if (!store.rawQuestion.trim()) return;
     setLoading(true); setMsg(null);
-    const result = await callAgent("research_mentor", "研究问题", () => callMentor({ task: "图形识别", student_input: store.rawQuestion, grade_level: "beginner" }));
+    const result = await callAgent("research_mentor", "研究问题", () => callMentor({ task: "手写数字识别", student_input: store.rawQuestion, grade_level: "beginner" }));
     if (result.ok) store.set({ suggestedQuestions: (result.data as any).suggested_questions || [] });
     else { store.set({ suggestedQuestions: [QUESTION_TEMPLATES[0]] }); setMsg({ text: result.error, ok: false }); }
     setLoading(false);
@@ -113,17 +113,10 @@ function TaskAndQuestion() {
     try { await saveQuestion({ session_id: store.sessionId!, raw_question: q, refined_question: q, independent_variable: "噪声水平", dependent_variables: ["准确率"], controlled_variables: ["数据量","训练比例"] }); } catch {}
   };
   const selectedQ = store.refinedQuestion;
-  const flowItems = selectedQ ? [
-    { stage: "选择研究任务", output: "图形识别算法研究 — 识别像素化的圆形/正方形/三角形" },
-    { stage: "设计实验", output: `选择算法 / 数据量(${store.nSamples}) / 噪声(${(store.noiseLevels[0]*100).toFixed(0)}%) / 重复 ${store.numTrials} 次` },
-    { stage: "运行实验", output: `生成像素图形 → 算法训练 → 逐个测试 → 计算准确率` },
-    { stage: "分析结果", output: "对比各算法准确率 → 分析噪声对各算法的影响 → 验证假设" },
-    { stage: "总结报告", output: "自动生成包含数据表格的 Markdown 报告" },
-  ] : null;
 
   return (
     <StageContainer step={1} title="选择研究任务" agent={msg}>
-      <div className="card"><h3 className="font-semibold mb-2">👁️ 图形识别算法研究</h3><p className="text-sm text-gray-500">生成圆形、正方形、三角形的像素图像并加噪声，研究不同识别算法的表现。</p></div>
+      <div className="card"><h3 className="font-semibold mb-2">🔢 手写数字识别算法研究</h3><p className="text-sm text-gray-500">生成 0-9 的简化手写数字像素图像，加入噪声，研究不同识别算法的表现。</p></div>
       <div className="card">
         <h2 className="font-semibold text-gray-700 mb-3">选择或输入你想研究的问题</h2>
         <div className="grid gap-2 mb-3">{QUESTION_TEMPLATES.map(t => <button key={t} onClick={() => handleSelectQuestion(t)} className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedQ === t ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}>{t}</button>)}</div>
@@ -135,7 +128,6 @@ function TaskAndQuestion() {
       </div>
       {selectedQ && (<>
         <div className="card border-blue-200 bg-blue-50/50"><h3 className="font-semibold text-sm text-gray-700 mb-2">你的研究问题</h3><p className="text-sm text-gray-800 font-medium">{selectedQ}</p></div>
-        {flowItems && <div className="card border-green-100 bg-green-50/30"><h3 className="font-semibold text-sm text-gray-700 mb-3">📋 研究流程预览</h3><div className="space-y-2">{flowItems.map((item, i) => <div key={i} className="flex gap-3 text-xs"><span className="w-24 text-gray-400 shrink-0">{item.stage}</span><span className="text-gray-600">{item.output}</span></div>)}</div></div>}
         <div className="flex justify-end"><button className="btn-primary" onClick={() => { store.set({ designCompleted: false, experimentResult: null }); store.setStage("EXPERIMENT_DESIGNED"); }}>确认 → 设计实验</button></div>
       </>)}
     </StageContainer>
@@ -143,7 +135,7 @@ function TaskAndQuestion() {
 }
 
 function Stage4() {
-  const store = useShapeRecogStore();
+  const store = useDigitsStore();
   const [infoAlgo, setInfoAlgo] = useState<string | null>(null);
   const selected = store.selectedAlgorithms;
   const toggle = (a: typeof ALGORITHMS[0]) => {
@@ -169,14 +161,14 @@ function Stage4() {
 }
 
 function Stage5() {
-  const store = useShapeRecogStore();
+  const store = useDigitsStore();
   const [running, setRunning] = useState(false);
 
   const execRun = async () => {
     setRunning(true);
-    const algos = store.selectedAlgorithms.length > 0 ? store.selectedAlgorithms : ["TEMPLATE", "PIXEL_KNN", "FEATURE", "RANDOM"];
+    const algos = store.selectedAlgorithms.length > 0 ? store.selectedAlgorithms : ["PIXEL_KNN", "DECISION_TREE", "MLP", "CNN"];
     try {
-      const data = await runShapeRecogExperiment({ session_id: store.sessionId!, algorithms: algos, settings: { n_samples: store.nSamples, noise_levels: store.noiseLevels, num_trials: store.numTrials, train_ratio: store.trainRatio, seed: (Date.now() % 9000) + 1000 } });
+      const data = await runDigitsExperiment({ session_id: store.sessionId!, algorithms: algos, settings: { n_samples: store.nSamples, noise_levels: store.noiseLevels, num_trials: store.numTrials, train_ratio: store.trainRatio, seed: (Date.now() % 9000) + 1000 } });
       store.set({ experimentResult: data as any });
     } catch { store.set({ experimentResult: generateMock(store) }); }
     finally { setRunning(false); }
@@ -187,9 +179,7 @@ function Stage5() {
   const result = store.experimentResult;
   const displayRuns = result?.runs ? result.runs.filter((r: any) => r.trial === store.selectedTrial) : [];
   const nameOf = (a: string) => ALGORITHMS.find(x => x.key === a)?.name || a;
-  const SHAPE_NAMES: Record<string, string> = { circle: "圆形", square: "正方形", triangle: "三角形" };
 
-  // 每个算法取前 6 个测试样本用于对比展示
   const algoPreviews = displayRuns.map((r: any) => ({
     algorithm: r.algorithm,
     name: nameOf(r.algorithm),
@@ -206,7 +196,7 @@ function Stage5() {
     <StageContainer step={3} title="运行实验" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("EXPERIMENT_DESIGNED")}>← 上一步</button><button className="btn-primary" onClick={() => store.setStage("RESULT_ANALYZED")} disabled={!result}>查看结果 → 分析</button></div>}>
       <div className="card">
         <div className="flex items-center justify-between flex-wrap gap-3">
-          <div><h2 className="font-semibold">实验配置</h2><p className="text-sm text-gray-400">算法：{store.selectedAlgorithms.map(nameOf).join("、") || "模板匹配/KNN/特征/随机"} | {store.nSamples} 样本 | 噪声 {(store.noiseLevels[0] * 100).toFixed(0)}% | ×{store.numTrials} 次</p></div>
+          <div><h2 className="font-semibold">实验配置</h2><p className="text-sm text-gray-400">算法：{store.selectedAlgorithms.map(nameOf).join("、") || "KNN/决策树/MLP/CNN"} | {store.nSamples} 样本 | 噪声 {(store.noiseLevels[0] * 100).toFixed(0)}% | ×{store.numTrials} 次</p></div>
           <button className="btn-primary text-lg px-6" onClick={execRun} disabled={running}>{running ? "⏳ 运行中..." : result ? "🔄 重新运行" : "▶ 开始实验"}</button>
         </div>
         {result && store.numTrials > 1 && (
@@ -223,7 +213,7 @@ function Stage5() {
         </div>
       )}
 
-      {/* 逐算法预测对比 — 每个算法一行，展示前 6 个样本的预测结果 */}
+      {/* 逐算法预测对比 */}
       {algoPreviews.length > 0 && (
         <div className="card">
           <h3 className="font-semibold text-gray-700 mb-3 text-sm">第 {store.selectedTrial} 组 — 各算法预测对比（前 6 个测试样本）</h3>
@@ -239,8 +229,8 @@ function Stage5() {
                     const correct = ap.labels[i] === ap.preds[i];
                     return (
                       <ShapeGrid key={i} grid={g}
-                        label={SHAPE_NAMES[ap.labels[i]] || String(ap.labels[i])}
-                        predicted={SHAPE_NAMES[ap.preds[i]] || String(ap.preds[i])}
+                        label={DIGIT_NAMES[ap.labels[i]] ?? String(ap.labels[i])}
+                        predicted={DIGIT_NAMES[ap.preds[i]] ?? String(ap.preds[i])}
                         correct={correct} animate={false} />
                     );
                   })}
@@ -259,9 +249,9 @@ function Stage5() {
 }
 
 function Stage6() {
-  const store = useShapeRecogStore(); const [analyzing, setAnalyzing] = useState(false);
+  const store = useDigitsStore(); const [analyzing, setAnalyzing] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
-  const handleAnalyze = async () => { setAnalyzing(true); setMsg(null); const r = await callAgent("data_analyst", "分析结果", () => callDataAnalyst({ hypothesis: store.hypothesis || "哪种算法更稳定？", experiment_results: store.experimentResult?.summary || {} })); store.set({ aiAnalysis: r.ok ? r.data as any : { summary: "模板匹配在低噪声时最准，但噪声增加后像素KNN和特征分类更稳定。随机基线保持在约33%。", key_findings: ["模板匹配低噪声优秀","像素KNN对噪声有一定鲁棒性","特征分类维度低速度快"], questions_for_student: ["特征分类为什么在噪声大时反而更稳定？","你会选哪种方法用于实际应用？"] } }); if (!r.ok) setMsg({ text: r.error, ok: false }); setAnalyzing(false); };
+  const handleAnalyze = async () => { setAnalyzing(true); setMsg(null); const r = await callAgent("data_analyst", "分析结果", () => callDataAnalyst({ hypothesis: store.hypothesis || "哪种算法更稳定？", experiment_results: store.experimentResult?.summary || {} })); store.set({ aiAnalysis: r.ok ? r.data as any : { summary: "CNN 和 MLP 在手写数字识别中表现优异，决策树次之。随机基线准确率约10%。", key_findings: ["CNN利用空间结构表现最好","MLP也能学习到良好特征","决策树在面对10个类别时容易过拟合"], questions_for_student: ["为什么CNN比MLP更适合图像识别？","数据量减少时模型表现如何变化？"] } }); if (!r.ok) setMsg({ text: r.error, ok: false }); setAnalyzing(false); };
   const handleSave = async () => { try { await saveAnalysis(store.sessionId!, store.studentAnalysis); } catch {} };
   return (
     <StageContainer step={4} title="分析结果" agent={msg} actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("EXPERIMENT_RUNNING")}>← 上一步</button><button className="btn-primary" onClick={() => { handleSave(); store.setStage("REPORT_GENERATED"); }} disabled={!store.studentAnalysis.trim()}>保存 → 总结报告</button></div>}>
@@ -274,7 +264,7 @@ function Stage6() {
 }
 
 function Stage7() {
-  const store = useShapeRecogStore(); const navigate = useNavigate(); const [preview, setPreview] = useState(false);
+  const store = useDigitsStore(); const navigate = useNavigate(); const [preview, setPreview] = useState(false);
   const md = buildReport(store); if (!store.reportMarkdown) store.set({ reportMarkdown: md });
   return (
     <StageContainer step={5} title="总结报告" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("RESULT_ANALYZED")}>← 上一步</button><button className="btn-primary" onClick={() => { archiveSession({ sessionId: store.sessionId, taskId: store.taskId, question: store.refinedQuestion || store.rawQuestion, hypothesis: store.hypothesis, algorithms: store.selectedAlgorithms, summary: store.experimentResult?.summary || null, analysis: store.studentAnalysis, reflection: {}, report: store.reportMarkdown, review: {} }); navigate("/archive"); }}>完成研究 → 档案</button></div>}>
@@ -285,19 +275,19 @@ function Stage7() {
   );
 }
 
-function buildReport(store: ReturnType<typeof useShapeRecogStore.getState>): string {
+function buildReport(store: ReturnType<typeof useDigitsStore.getState>): string {
   const summary = store.experimentResult ? Object.entries(store.experimentResult.summary).map(([a, s]: any) => `| ${ALGORITHMS.find(x => x.key === a)?.name || a} | ${(s.avg_accuracy * 100).toFixed(1)}% | ${s.avg_runtime_ms}ms |`).join("\n") : "| - | - | - |";
-  return [`# 图形识别算法比较研究`, "", `## 1. 研究问题`, store.refinedQuestion || store.rawQuestion, "", `## 2. 实验设计`, `- 对比算法：${store.selectedAlgorithms.join("、")}`, `- 数据量：${store.nSamples}`, `- 噪声水平：${(store.noiseLevels[0] * 100).toFixed(0)}%`, `- 重复次数：${store.numTrials}`, "", `## 3. 实验结果`, `| 算法 | 平均准确率 | 平均耗时 |`, `|---|---:|---:|`, summary, "", `## 4. 结果分析`, store.studentAnalysis, "", `## 5. 总结`].join("\n");
+  return [`# 手写数字识别算法比较研究`, "", `## 1. 研究问题`, store.refinedQuestion || store.rawQuestion, "", `## 2. 实验设计`, `- 对比算法：${store.selectedAlgorithms.join("、")}`, `- 数据量：${store.nSamples}`, `- 噪声水平：${(store.noiseLevels[0] * 100).toFixed(0)}%`, `- 重复次数：${store.numTrials}`, "", `## 3. 实验结果`, `| 算法 | 平均准确率 | 平均耗时 |`, `|---|---:|---:|`, summary, "", `## 4. 结果分析`, store.studentAnalysis, "", `## 5. 总结`].join("\n");
 }
 
-function generateMock(store: ReturnType<typeof useShapeRecogStore.getState>) {
-  const algos = store.selectedAlgorithms.length > 0 ? store.selectedAlgorithms : ["TEMPLATE", "PIXEL_KNN", "FEATURE", "RANDOM"];
-  const runs: any[] = []; const accuracies: Record<string, number> = { TEMPLATE: 0.95, PIXEL_KNN: 0.90, FEATURE: 0.85, DECISION_TREE: 0.82, MLP: 0.92, CNN: 0.94, RANDOM: 0.33 };
+function generateMock(store: ReturnType<typeof useDigitsStore.getState>) {
+  const algos = store.selectedAlgorithms.length > 0 ? store.selectedAlgorithms : ["PIXEL_KNN", "DECISION_TREE", "MLP", "CNN"];
+  const runs: any[] = []; const accuracies: Record<string, number> = { TEMPLATE: 0.68, PIXEL_KNN: 0.85, FEATURE: 0.55, DECISION_TREE: 0.72, MLP: 0.88, CNN: 0.92, RANDOM: 0.10 };
   for (let t = 1; t <= store.numTrials; t++) for (const a of algos) {
-    const acc = accuracies[a] + (Math.random() - 0.5) * 0.06;
+    const acc = accuracies[a] ? accuracies[a] + (Math.random() - 0.5) * 0.06 : 0.5 + Math.random() * 0.3;
     const total = Math.floor(store.nSamples * (1 - store.trainRatio));
     const correct = Math.round(acc * total);
-    runs.push({ algorithm: a, n_samples: store.nSamples, noise_level: store.noiseLevels[0], trial: t, accuracy: +acc.toFixed(3), correct, total, runtime_ms: +(a === "RANDOM" ? 0.1 : a === "FEATURE" ? 0.5 : a === "TEMPLATE" ? 1 : 2).toFixed(1), test_grids: [], test_labels: [], predictions: [] });
+    runs.push({ algorithm: a, n_samples: store.nSamples, noise_level: store.noiseLevels[0], trial: t, accuracy: +acc.toFixed(3), correct, total, runtime_ms: +(a === "RANDOM" ? 0.1 : a === "FEATURE" ? 0.5 : a === "TEMPLATE" ? 1 : a === "DECISION_TREE" ? 3 : a === "MLP" ? 80 : a === "CNN" ? 120 : 2).toFixed(1), test_grids: [], test_labels: [], predictions: [] });
   }
   const groups: Record<string, any[]> = {}; for (const r of runs) { groups[r.algorithm] = groups[r.algorithm] || []; groups[r.algorithm].push(r); }
   const summary: Record<string, any> = {}; for (const [k, v] of Object.entries(groups)) { const accs = v.map(r => r.accuracy); summary[k] = { avg_accuracy: +(accs.reduce((s, x) => s + x, 0) / accs.length).toFixed(3), min_accuracy: Math.min(...accs), max_accuracy: Math.max(...accs), avg_runtime_ms: +(v.reduce((s, r) => s + r.runtime_ms, 0) / v.length).toFixed(1), count: v.length }; }

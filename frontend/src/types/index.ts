@@ -264,7 +264,7 @@ export interface StringSearchResult {
 }
 
 // ========== 图形识别实验 ==========
-export type ShapeRecogAlgorithmType = "TEMPLATE" | "PIXEL_KNN" | "FEATURE" | "RANDOM";
+export type ShapeRecogAlgorithmType = "TEMPLATE" | "PIXEL_KNN" | "FEATURE" | "DECISION_TREE" | "MLP" | "CNN" | "RANDOM";
 
 export interface ShapeRecogRun {
   algorithm: string; n_samples: number; noise_level: number; trial: number;
@@ -276,4 +276,43 @@ export interface ShapeRecogResult {
   experiment_batch_id: string; status: string; total_runs: number;
   summary: Record<string, { avg_accuracy: number; min_accuracy: number; max_accuracy: number; avg_runtime_ms: number; count: number }>;
   runs: ShapeRecogRun[];
+}
+
+// ========== 手写数字识别实验 ==========
+export type DigitRecogAlgorithmType = "TEMPLATE" | "PIXEL_KNN" | "FEATURE" | "DECISION_TREE" | "MLP" | "CNN" | "RANDOM";
+
+export interface DigitRecogRun {
+  algorithm: string; n_samples: number; noise_level: number; trial: number;
+  accuracy: number; correct: number; total: number; runtime_ms: number;
+  test_grids: number[][][]; test_labels: number[]; predictions: number[];
+}
+
+export interface DigitRecogResult {
+  experiment_batch_id: string; status: string; total_runs: number;
+  summary: Record<string, { avg_accuracy: number; min_accuracy: number; max_accuracy: number; avg_runtime_ms: number; count: number }>;
+  runs: DigitRecogRun[];
+}
+
+// ========== 统一图像识别实验（合并图形+数字） ==========
+export type ImageRecogExperimentType = "shape" | "digits";
+
+export interface ImageRecogVisualizerStep {
+  testIndex: number; grid: number[][];
+  trueLabel: string | number; predictedLabel: string | number; correct: boolean;
+}
+
+export interface ImageRecogRun {
+  algorithm: string; experiment_type: string; n_samples: number;
+  noise_level: number; trial: number; accuracy: number; correct: number; total: number;
+  runtime_ms: number; train_ratio: number;
+  params_used: Record<string, number>;
+  test_grids: number[][][]; test_labels: (string | number)[]; predictions: (string | number)[];
+  viz_steps: ImageRecogVisualizerStep[];
+}
+
+export interface ImageRecogResult {
+  experiment_batch_id: string; experiment_type: string;
+  status: string; total_runs: number;
+  summary: Record<string, { avg_accuracy: number; min_accuracy: number; max_accuracy: number; avg_runtime_ms: number; count: number }>;
+  runs: ImageRecogRun[];
 }

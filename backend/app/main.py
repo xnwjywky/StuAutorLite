@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import sessions, questions, experiments, analysis, reports, agents, reflection, classify, guessnumber, sorting, stringsearch, shaperecog
+from app.api.routes import sessions, questions, experiments, analysis, reports, agents, reflection, classify, guessnumber, sorting, stringsearch, shaperecog, digits, imagerecog
 from app.models.database import init_db
 from app.config import settings
 
@@ -31,6 +31,8 @@ app.include_router(guessnumber.router, prefix="/api")
 app.include_router(sorting.router, prefix="/api")
 app.include_router(stringsearch.router, prefix="/api")
 app.include_router(shaperecog.router, prefix="/api")
+app.include_router(digits.router, prefix="/api")
+app.include_router(imagerecog.router, prefix="/api")
 
 
 @app.on_event("startup")

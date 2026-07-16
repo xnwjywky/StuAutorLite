@@ -35,6 +35,8 @@ class Session(Base):
     sorting_runs = relationship("SortingRun", back_populates="session", cascade="all, delete-orphan")
     string_search_runs = relationship("StringSearchRun", back_populates="session", cascade="all, delete-orphan")
     shape_recog_runs = relationship("ShapeRecogRun", back_populates="session", cascade="all, delete-orphan")
+    digits_runs = relationship("DigitsRun", back_populates="session", cascade="all, delete-orphan")
+    imagerecog_runs = relationship("ImageRecogRun", back_populates="session", cascade="all, delete-orphan")
     analyses = relationship("AnalysisRecord", back_populates="session", cascade="all, delete-orphan")
     reports = relationship("ResearchReport", back_populates="session", cascade="all, delete-orphan")
     reflections = relationship("ReflectionQuestion", back_populates="session", cascade="all, delete-orphan")
@@ -286,6 +288,59 @@ class ShapeRecogRun(Base):
 
     session = relationship("Session", back_populates="shape_recog_runs")
 
+
+
+# ── 手写数字识别实验运行 ──────────────────────────────────
+class DigitsRun(Base):
+    __tablename__ = "digits_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
+    batch_id = Column(String(64), default="")
+    algorithm = Column(String(32), nullable=False)
+    n_samples = Column(Integer, default=200)
+    noise_level = Column(Float, default=0.0)
+    trial = Column(Integer, default=1)
+    seed = Column(Integer, default=0)
+    accuracy = Column(Float, default=0)
+    correct = Column(Integer, default=0)
+    total = Column(Integer, default=0)
+    runtime_ms = Column(Float, default=0)
+    train_ratio = Column(Float, default=0.7)
+    test_grids_data = Column(Text, default="")
+    test_labels_data = Column(Text, default="")
+    predictions_data = Column(Text, default="")
+    created_at = Column(DateTime, server_default=func.now())
+
+    session = relationship("Session", back_populates="digits_runs")
+
+
+# ── 统一图像识别实验运行（§16.2 合并模块）──────────────────
+class ImageRecogRun(Base):
+    __tablename__ = "imagerecog_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
+    batch_id = Column(String(64), default="")
+    experiment_type = Column(String(16), default="shape")  # "shape" | "digits"
+    algorithm = Column(String(32), nullable=False)
+    n_samples = Column(Integer, default=200)
+    noise_level = Column(Float, default=0.0)
+    trial = Column(Integer, default=1)
+    seed = Column(Integer, default=0)
+    accuracy = Column(Float, default=0)
+    correct = Column(Integer, default=0)
+    total = Column(Integer, default=0)
+    runtime_ms = Column(Float, default=0)
+    train_ratio = Column(Float, default=0.7)
+    params_used = Column(Text, default="")          # JSON: {hidden: 64, epochs: 30, ...}
+    test_grids_data = Column(Text, default="")       # JSON: [[[0,1,...],...],...]
+    test_labels_data = Column(Text, default="")      # JSON: ["circle","square",...] or [0,1,3,...]
+    predictions_data = Column(Text, default="")      # JSON: same as above
+    viz_steps_data = Column(Text, default="")        # JSON: [{testIndex,grid,trueLabel,predictedLabel,correct},...]
+    created_at = Column(DateTime, server_default=func.now())
+
+    session = relationship("Session", back_populates="imagerecog_runs")
 
 
 # ── 初始化 ───────────────────────────────────────────────

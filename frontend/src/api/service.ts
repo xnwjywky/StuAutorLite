@@ -233,3 +233,61 @@ export async function runShapeRecogExperiment(data: {
 }): Promise<import("../types").ShapeRecogResult & { runs: any[] }> {
   return apiClient.post("/api/shaperecog/run", data) as Promise<any>;
 }
+
+// ── 手写数字识别实验 ──────────────────────────────────────────
+export async function runDigitsExperiment(data: {
+  session_id: number; algorithms: string[]; settings: Record<string, unknown>;
+}): Promise<import("../types").DigitRecogResult & { runs: any[] }> {
+  return apiClient.post("/api/digits/run", data) as Promise<any>;
+}
+
+// ── 统一图像识别实验（合并图形+数字） ──────────────────────────
+export async function runImageRecogExperiment(data: {
+  session_id: number; experiment_type: string; algorithms: string[];
+  algo_params?: Record<string, Record<string, number>>; settings: Record<string, unknown>;
+}): Promise<import("../types").ImageRecogResult & { runs: any[] }> {
+  return apiClient.post("/api/imagerecog/run", data) as Promise<any>;
+}
+
+/** SSE 流式运行 — 返回 ReadableStream 用于实时进度 */
+export async function runImageRecogStream(
+  data: {
+    session_id: number; experiment_type: string; algorithms: string[];
+    algo_params?: Record<string, Record<string, number>>; settings: Record<string, unknown>;
+  },
+  onEvent: (event: any) => void,
+  onError: (err: Error) => void,
+): Promise<void> {
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+  try {
+    const resp = await fetch(`${baseUrl}/api/imagerecog/run-stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const reader = resp.body?.getReader();
+    if (!reader) throw new Error("无法读取响应流");
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("data: ")) {
+          try {
+            const event = JSON.parse(trimmed.slice(6));
+            onEvent(event);
+            if (event.type === "done" || event.type === "error") return;
+          } catch {}
+        }
+      }
+    }
+  } catch (e) {
+    onError(e as Error);
+  }
+}

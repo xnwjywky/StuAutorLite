@@ -18,6 +18,8 @@ import ClassificationWorkbench from "./pages/ClassificationWorkbench";
 import GuessNumberWorkbench from "./pages/GuessNumberWorkbench";
 import SortingWorkbench from "./pages/SortingWorkbench";
 import ShapeRecogWorkbench from "./pages/ShapeRecogWorkbench";
+import DigitsWorkbench from "./pages/DigitsWorkbench";
+import ImageRecogWorkbench from "./pages/ImageRecogWorkbench";
 
 export default function App() {
   return (
@@ -31,6 +33,8 @@ export default function App() {
       <Route path="/workbench-guess/:sessionId" element={<GuessNumberWorkbench />} />
       <Route path="/workbench-sort/:sessionId" element={<SortingWorkbench />} />
       <Route path="/workbench-shape/:sessionId" element={<ShapeRecogWorkbench />} />
+      <Route path="/workbench-digits/:sessionId" element={<DigitsWorkbench />} />
+      <Route path="/workbench-imagerecog/:sessionId" element={<ImageRecogWorkbench />} />
       <Route path="/question" element={<QuestionForm />} />
       <Route path="/hypothesis" element={<HypothesisForm />} />
       <Route path="/experiment-design" element={<ExperimentDesign />} />

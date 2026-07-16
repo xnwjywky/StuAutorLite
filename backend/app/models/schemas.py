@@ -201,3 +201,19 @@ class ClassifyRunRequest(BaseModel):
     session_id: int
     classifiers: list[str] = Field(default_factory=lambda: ["KNN", "DECISION_TREE", "RANDOM"])
     settings: dict = Field(default_factory=dict)
+
+
+# ── 手写数字识别实验 (§16.2) ──────────────────────────────
+class DigitsRunRequest(BaseModel):
+    session_id: int
+    algorithms: list[str] = Field(default_factory=lambda: ["PIXEL_KNN", "DECISION_TREE", "MLP", "CNN"])
+    settings: dict = Field(default_factory=dict)
+
+
+# ── 统一图像识别实验 (§16.2 合并模块) ─────────────────────
+class ImageRecogRunRequest(BaseModel):
+    session_id: int
+    experiment_type: str = "shape"       # "shape" | "digits"
+    algorithms: list[str] = Field(default_factory=lambda: ["TEMPLATE", "PIXEL_KNN", "DECISION_TREE", "MLP", "CNN", "RANDOM"])
+    algo_params: dict = Field(default_factory=dict)
+    settings: dict = Field(default_factory=dict)
