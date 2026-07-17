@@ -37,6 +37,7 @@ class Session(Base):
     shape_recog_runs = relationship("ShapeRecogRun", back_populates="session", cascade="all, delete-orphan")
     digits_runs = relationship("DigitsRun", back_populates="session", cascade="all, delete-orphan")
     imagerecog_runs = relationship("ImageRecogRun", back_populates="session", cascade="all, delete-orphan")
+    mnist_runs = relationship("MNISTRun", back_populates="session", cascade="all, delete-orphan")
     analyses = relationship("AnalysisRecord", back_populates="session", cascade="all, delete-orphan")
     reports = relationship("ResearchReport", back_populates="session", cascade="all, delete-orphan")
     reflections = relationship("ReflectionQuestion", back_populates="session", cascade="all, delete-orphan")
@@ -341,6 +342,33 @@ class ImageRecogRun(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     session = relationship("Session", back_populates="imagerecog_runs")
+
+
+# ── MNIST 手写数字识别实验运行 ────────────────────────────
+class MNISTRun(Base):
+    __tablename__ = "mnist_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
+    batch_id = Column(String(64), default="")
+    architecture_id = Column(String(64), default="standardcnn")
+    architecture_json = Column(Text, default="")       # JSON
+    hyperparams_json = Column(Text, default="")         # JSON
+    seed = Column(Integer, default=42)
+    train_losses = Column(Text, default="")             # JSON array
+    train_accs = Column(Text, default="")               # JSON array
+    val_losses = Column(Text, default="")               # JSON array
+    val_accs = Column(Text, default="")                 # JSON array
+    test_accuracy = Column(Float, default=0)
+    test_loss = Column(Float, default=0)
+    best_epoch = Column(Integer, default=0)
+    training_time = Column(Float, default=0)
+    overfitting_score = Column(Float, default=0)
+    confusion_matrix = Column(Text, default="")         # JSON 10×10
+    runtime_ms = Column(Float, default=0)
+    created_at = Column(DateTime, server_default=func.now())
+
+    session = relationship("Session", back_populates="mnist_runs")
 
 
 # ── 初始化 ───────────────────────────────────────────────

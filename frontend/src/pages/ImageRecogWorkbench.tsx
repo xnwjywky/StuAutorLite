@@ -79,12 +79,13 @@ export default function ImageRecogWorkbench() {
   useEffect(() => { const id = Number(sessionId); store.init(Number.isNaN(id) ? -1 : id); }, [sessionId]);
   if (store.sessionId === null) return null;
   const isShape = store.experimentType === "shape";
+  const isMNIST = store.experimentType === "mnist";
   return (
     <Layout>
       <div className="flex" style={{ minHeight: "calc(100vh - 56px)" }}>
         <aside className="w-64 bg-white border-r border-gray-200 p-4 flex-shrink-0">
           <h1 className="text-lg font-bold text-gray-800 mb-2">研究工作台</h1>
-          <p className="text-xs text-gray-400 mb-4">{isShape ? "图形识别算法研究" : "手写数字识别算法研究"}</p>
+          <p className="text-xs text-gray-400 mb-4">{isMNIST ? "MNIST 手写数字识别" : isShape ? "图形识别算法研究" : "手写数字识别算法研究"}</p>
           <FlowStepper steps={STEPS} current={store.currentStage} onStepClick={(s) => {
             if (s === "TASK_SELECTED") { store.setStage("TASK_SELECTED"); return; }
             if (!store.refinedQuestion) { store.setStage("TASK_SELECTED"); return; }
@@ -114,12 +115,14 @@ function Stage1() {
   const store = useImageRecogStore();
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const navigate = useNavigate();
   const isShape = store.experimentType === "shape";
-  const taskName = isShape ? "图形识别" : "手写数字识别";
+  const isMNIST = store.experimentType === "mnist";
+  const taskName = isMNIST ? "MNIST手写数字识别" : "图形识别";
 
-  const templates = isShape
-    ? ["增加噪声后，哪种识别方法最稳定？", "模板匹配和像素KNN谁更准确？", "简单方法和神经网络方法有什么区别？"]
-    : ["数据量变少时，哪个模型最稳定？", "加入噪声后，哪种模型的准确率下降最少？", "CNN的卷积结构是否真的比MLP更适合图像？", "简单模型和深度模型在手写数字识别上有什么区别？"];
+  const templates = isMNIST
+    ? ["增加卷积层数量能否提升手写数字识别准确率？", "学习率过大或过小对模型训练有什么影响？", "Dropout 如何影响模型的泛化能力？", "不同优化器（SGD vs Adam）在 CNN 训练中的表现有何差异？"]
+    : ["增加噪声后，哪种识别方法最稳定？", "模板匹配和像素KNN谁更准确？", "简单方法和神经网络方法有什么区别？"];
 
   const handleSuggest = async () => {
     if (!store.rawQuestion.trim()) return;
@@ -132,7 +135,19 @@ function Stage1() {
 
   const handleSelectQuestion = async (q: string) => {
     store.set({ refinedQuestion: q, rawQuestion: q });
-    try { await saveQuestion({ session_id: store.sessionId!, raw_question: q, refined_question: q, independent_variable: "噪声水平", dependent_variables: ["准确率"], controlled_variables: ["数据量", "训练比例"] }); } catch {}
+    try { await saveQuestion({ session_id: store.sessionId!, raw_question: q, refined_question: q, independent_variable: isMNIST ? "网络架构/超参数" : "噪声水平", dependent_variables: ["准确率"], controlled_variables: isMNIST ? ["数据集", "随机种子"] : ["数据量", "训练比例"] }); } catch {}
+  };
+
+  const handleConfirm = () => {
+    if (isMNIST) {
+      // 携带已选的研究问题，让 MNISTWorkbench 直接跳到 Stage2
+      navigate(`/workbench-mnist/${store.sessionId}`, {
+        state: { refinedQuestion: store.refinedQuestion, rawQuestion: store.rawQuestion, startStage: "EXPERIMENT_DESIGNED" },
+      });
+      return;
+    }
+    store.set({ designCompleted: false, experimentResult: null });
+    store.setStage("EXPERIMENT_DESIGNED");
   };
 
   const selectedQ = store.refinedQuestion;
@@ -143,16 +158,16 @@ function Stage1() {
         <div className={`card flex flex-col cursor-pointer transition-all ${isShape ? "ring-2 ring-blue-500 bg-blue-50/50" : "hover:shadow-md hover:bg-gray-50/30"}`}
           onClick={() => store.switchMode("shape")}>
           <h3 className="font-semibold mb-1">形状识别</h3>
-          <p className="text-xs text-gray-500 mb-2">识别像素化圆形、正方形、三角形（3类），对比7种算法。</p>
+          <p className="text-xs text-gray-500 mb-2">像素化圆形、正方形、三角形（3类），对比7种算法。</p>
           <div className="flex flex-wrap gap-1">{["模板匹配","KNN","特征","决策树","MLP","CNN","随机"].map(n=><span key={n} className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{n}</span>)}</div>
           {isShape && <span className="text-[10px] text-blue-400 mt-2">✓ 当前选择</span>}
         </div>
-        <div className={`card flex flex-col cursor-pointer transition-all ${!isShape ? "ring-2 ring-fuchsia-500 bg-fuchsia-50/50" : "hover:shadow-md hover:bg-gray-50/30"}`}
-          onClick={() => store.switchMode("digits")}>
-          <h3 className="font-semibold mb-1">🔢 手写数字识别</h3>
-          <p className="text-xs text-gray-500 mb-2">识别 0-9 经典手写数字（10类），多种书写风格+噪声，对比5种算法。</p>
-          <div className="flex flex-wrap gap-1">{["KNN","决策树","MLP","CNN","随机"].map(n=><span key={n} className="text-[10px] bg-fuchsia-50 text-fuchsia-600 px-2 py-0.5 rounded-full">{n}</span>)}</div>
-          {!isShape && <span className="text-[10px] text-fuchsia-400 mt-2">✓ 当前选择</span>}
+        <div className={`card flex flex-col cursor-pointer transition-all ${isMNIST ? "ring-2 ring-purple-500 bg-purple-50/50" : "hover:shadow-md hover:bg-gray-50/30"}`}
+          onClick={() => store.switchMode("mnist")}>
+          <h3 className="font-semibold mb-1">🧠 MNIST 手写数字识别</h3>
+          <p className="text-xs text-gray-500 mb-2">真实 PyTorch CNN 训练 MNIST 28×28 手写数字，4种预设架构，实时训练曲线监控。</p>
+          <div className="flex flex-wrap gap-1">{["CNN","PyTorch","MNIST","深度学习"].map(n=><span key={n} className="text-[10px] bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full">{n}</span>)}</div>
+          {isMNIST && <span className="text-[10px] text-purple-400 mt-2">✓ 当前选择</span>}
         </div>
       </div>
 
@@ -170,7 +185,7 @@ function Stage1() {
 
       {selectedQ && (<>
         <div className="card border-blue-200 bg-blue-50/50"><h3 className="font-semibold text-sm text-gray-700 mb-2">你的研究问题</h3><p className="text-sm text-gray-800 font-medium">{selectedQ}</p></div>
-        <div className="flex justify-end"><button className="btn-primary" onClick={() => { store.set({ designCompleted: false, experimentResult: null }); store.setStage("EXPERIMENT_DESIGNED"); }}>确认 → 设计实验</button></div>
+        <div className="flex justify-end"><button className="btn-primary" onClick={handleConfirm}>{isMNIST ? "确认 → 进入 MNIST 实验" : "确认 → 设计实验"}</button></div>
       </>)}
     </StageContainer>
   );

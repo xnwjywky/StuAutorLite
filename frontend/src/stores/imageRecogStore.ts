@@ -2,7 +2,7 @@
 import { create } from "zustand";
 import type { ResearchStage } from "../types";
 
-export type ImageRecogExperimentType = "shape" | "digits";
+export type ImageRecogExperimentType = "shape" | "digits" | "mnist";
 
 export interface ImageRecogWorkflowData {
   sessionId: number | null;

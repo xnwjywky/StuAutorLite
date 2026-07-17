@@ -241,6 +241,16 @@ export async function runDigitsExperiment(data: {
   return apiClient.post("/api/digits/run", data) as Promise<any>;
 }
 
+// ── MNIST 手写数字识别实验 ────────────────────────────────────
+export async function getMNISTArchitectures(): Promise<{ architectures: any[] }> {
+  return apiClient.get("/api/mnist/architectures") as Promise<{ architectures: any[] }>;
+}
+
+/** 预检 MNIST 依赖是否就绪 */
+export async function checkMNISTDeps(): Promise<{ deps_ok: boolean; error: string | null; python: string }> {
+  return apiClient.get("/api/mnist/check") as Promise<{ deps_ok: boolean; error: string | null; python: string }>;
+}
+
 // ── 统一图像识别实验（合并图形+数字） ──────────────────────────
 export async function runImageRecogExperiment(data: {
   session_id: number; experiment_type: string; algorithms: string[];

@@ -310,6 +310,29 @@ export interface ImageRecogRun {
   viz_steps: ImageRecogVisualizerStep[];
 }
 
+// ========== MNIST 手写数字识别实验 ==========
+export interface MNISTResult {
+  experiment_batch_id: string; status: string; total_runs: number;
+  summary: {
+    final_train_accuracy: number; final_test_accuracy: number;
+    best_epoch: number; best_val_accuracy: number;
+    training_time: number; overfitting_score: number;
+  };
+  runs: MNISTRunRecord[];
+}
+
+export interface MNISTRunRecord {
+  run_id: string; seed: number;
+  architecture: any; hyperparameters: any;
+  metrics: {
+    train_loss: number[]; train_acc: number[];
+    val_loss: number[]; val_acc: number[];
+    test_loss: number; test_acc: number;
+  };
+  confusion_matrix: number[][];
+  runtime_ms: number;
+}
+
 export interface ImageRecogResult {
   experiment_batch_id: string; experiment_type: string;
   status: string; total_runs: number;
