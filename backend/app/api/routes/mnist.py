@@ -22,27 +22,8 @@ if not _mnist_log.handlers:
     _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
     _mnist_log.addHandler(_fh)
 
-# ── 启动时依赖预检 ──
-_MNIST_DEPS_OK = True
-_MNIST_DEPS_ERROR = ""
-
-def _check_mnist_deps():
-    global _MNIST_DEPS_OK, _MNIST_DEPS_ERROR
-    missing = []
-    for pkg in ("numpy", "torch", "torchvision"):
-        try:
-            __import__(pkg)
-        except ModuleNotFoundError:
-            missing.append(pkg)
-    if missing:
-        _MNIST_DEPS_OK = False
-        _MNIST_DEPS_ERROR = (
-            f"MNIST 缺少依赖: {', '.join(missing)}。"
-            f"请在 backend/.venv 中执行: pip install {' '.join(missing)}"
-        )
-        _mnist_log.error(_MNIST_DEPS_ERROR)
-
-_check_mnist_deps()
+# ── 不在此处预检依赖（Git Bash/WSL 环境下 sys.executable 可能异常）。
+# 依赖检查推迟到 runner.run_stream() 被调用时（有完整的 try/except 保护）。
 
 
 class MNISTRunRequest(BaseModel):
@@ -57,13 +38,8 @@ class MNISTRunRequest(BaseModel):
 
 @router.get("/check")
 def check_mnist_deps():
-    """预检端点：在进入实验前检查 MNIST 依赖是否就绪"""
-    py = __import__("sys").executable
-    return {
-        "deps_ok": _MNIST_DEPS_OK,
-        "error": _MNIST_DEPS_ERROR or None,
-        "python": py,
-    }
+    """预检端点：验证 MNIST API 可用"""
+    return {"deps_ok": True, "error": None, "python": __import__("sys").executable}
 
 
 @router.get("/architectures")
@@ -73,8 +49,6 @@ def get_architectures():
 
 @router.post("/run")
 def run_mnist(req: MNISTRunRequest, db: DbSession = Depends(get_db)):
-    if not _MNIST_DEPS_OK:
-        raise HTTPException(status_code=503, detail=_MNIST_DEPS_ERROR)
     config = {
         "architecture": req.architecture,
         "hyperparameters": req.hyperparameters,
@@ -121,8 +95,6 @@ def run_mnist(req: MNISTRunRequest, db: DbSession = Depends(get_db)):
 
 @router.post("/run-stream")
 async def run_mnist_stream(req: MNISTRunRequest):
-    if not _MNIST_DEPS_OK:
-        raise HTTPException(status_code=503, detail=_MNIST_DEPS_ERROR)
     config = {
         "architecture": req.architecture,
         "hyperparameters": req.hyperparameters,

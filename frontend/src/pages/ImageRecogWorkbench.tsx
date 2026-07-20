@@ -28,21 +28,21 @@ const STEPS: { key: ResearchStage; label: string }[] = [
 
 // ── 图形识别算法 ——
 const SHAPE_ALGOS = [
-  { key: "TEMPLATE", name: "模板匹配", desc: "与标准模板逐像素比对", category: "直接匹配", params: [] as {key:string;label:string;default:number;min:number;max:number;step:number}[] },
-  { key: "PIXEL_KNN", name: "像素KNN", desc: "扁平化256维向量→K=3投票", category: "像素级", params: [{key:"k",label:"K值",default:3,min:1,max:9,step:2}] },
-  { key: "FEATURE", name: "特征分类", desc: "提取几何特征再KNN分类", category: "特征级", params: [{key:"k",label:"K值",default:3,min:1,max:9,step:2}] },
-  { key: "DECISION_TREE", name: "决策树", desc: "Gini不纯度逐层分裂像素", category: "树模型", params: [{key:"max_depth",label:"最大深度",default:8,min:3,max:16,step:1}] },
-  { key: "MLP", name: "MLP", desc: "256→64→n类, ReLU+Softmax", category: "神经网络", params: [{key:"hidden",label:"隐藏神经元",default:64,min:32,max:128,step:32},{key:"epochs",label:"训练轮数",default:30,min:10,max:50,step:10}] },
-  { key: "CNN", name: "小型CNN", desc: "3×3卷积(4f)→池化→FC", category: "神经网络", params: [{key:"filters",label:"卷积核数",default:4,min:2,max:8,step:2},{key:"epochs",label:"训练轮数",default:20,min:10,max:40,step:10}] },
-  { key: "RANDOM", name: "随机基线", desc: "随便猜，baseline对比", category: "baseline", params: [] },
+  { key: "TEMPLATE", name: "模板匹配", desc: "与标准模板逐像素比对，选最像的类别", category: "直接匹配", params: [] as {key:string;label:string;default:number;min:number;max:number;step:number;help:string}[] },
+  { key: "PIXEL_KNN", name: "像素KNN", desc: "扁平化256维向量，用K近邻投票分类", category: "像素级", params: [{key:"k",label:"K值",default:3,min:1,max:9,step:2,help:"K=1只看最近的一个邻居，容易受噪声影响；K=9参考更多邻居，结果更稳定但可能模糊边界"}] },
+  { key: "FEATURE", name: "特征分类", desc: "提取几何特征（像素数、宽高比、对称性），降维后再分类", category: "特征级", params: [{key:"k",label:"K值",default:3,min:1,max:9,step:2,help:"与像素KNN类似的K近邻参数，但这里是在5维特征空间中查找，速度更快"}] },
+  { key: "DECISION_TREE", name: "决策树", desc: "逐像素提问「这个像素亮吗？」，用Gini不纯度逐层分裂数据", category: "树模型", params: [{key:"max_depth",label:"最大深度",default:8,min:3,max:16,step:1,help:"树的层数。深度小=简单快速但可能欠拟合；深度大=复杂但可能过拟合。建议从8开始调整"}] },
+  { key: "MLP", name: "MLP", desc: "单隐藏层64神经元，反向传播自动学习像素组合模式", category: "神经网络", params: [{key:"hidden",label:"隐藏神经元",default:64,min:32,max:128,step:32,help:"隐藏层神经元数量。越多=模型越强但训练越慢；太少可能学不到足够特征"},{key:"epochs",label:"训练轮数",default:30,min:10,max:50,step:10,help:"完整遍历训练数据的次数。轮数少=训练不充分；轮数多=可能过拟合。配合曲线观察最佳轮数"}] },
+  { key: "CNN", name: "小型CNN", desc: "3×3卷积核扫描图像提取局部特征（边/角），池化后全连接分类", category: "神经网络", params: [{key:"filters",label:"卷积核数",default:4,min:2,max:8,step:2,help:"卷积核(filter)数量。越多=能提取更多种特征但计算量增加"},{key:"epochs",label:"训练轮数",default:20,min:10,max:40,step:10,help:"CNN通常比MLP收敛更快，20轮通常足够。可配合曲线判断是否需要更多轮数"}] },
+  { key: "RANDOM", name: "随机基线", desc: "不做任何识别纯粹随机猜，用作baseline对比下限", category: "baseline", params: [] },
 ];
 
 // ── 数字识别算法 ——
 const DIGIT_ALGOS = [
-  { key: "PIXEL_KNN", name: "像素KNN", desc: "256维向量→K=3投票", category: "像素级", params: [{key:"k",label:"K值",default:3,min:1,max:9,step:2}] },
-  { key: "DECISION_TREE", name: "决策树", desc: "Gini不纯度逐层分裂", category: "树模型", params: [{key:"max_depth",label:"最大深度",default:8,min:3,max:16,step:1}] },
-  { key: "MLP", name: "MLP", desc: "256→64→10, 30 epochs", category: "神经网络", params: [{key:"hidden",label:"隐藏神经元",default:64,min:32,max:128,step:32},{key:"epochs",label:"训练轮数",default:30,min:10,max:50,step:10}] },
-  { key: "CNN", name: "小型CNN", desc: "3×3卷积(4f)→池化→FC", category: "神经网络", params: [{key:"filters",label:"卷积核数",default:4,min:2,max:8,step:2},{key:"epochs",label:"训练轮数",default:20,min:10,max:40,step:10}] },
+  { key: "PIXEL_KNN", name: "像素KNN", desc: "256维向量→K=3投票", category: "像素级", params: [{key:"k",label:"K值",default:3,min:1,max:9,step:2,help:"K越小越敏感（容易受单个样本影响），K越大越平滑（但边界模糊）"}] },
+  { key: "DECISION_TREE", name: "决策树", desc: "Gini不纯度逐层分裂", category: "树模型", params: [{key:"max_depth",label:"最大深度",default:8,min:3,max:16,step:1,help:"控制树的复杂度。深度3=简单规则（只看上面3个像素）；深度16=非常细致（可能记住训练数据）"}] },
+  { key: "MLP", name: "MLP", desc: "256→64→10, 30 epochs", category: "神经网络", params: [{key:"hidden",label:"隐藏神经元",default:64,min:32,max:128,step:32,help:"神经元越多越能表达复杂模式，但训练时间也越长"},{key:"epochs",label:"训练轮数",default:30,min:10,max:50,step:10,help:"每轮完整过一遍数据。10轮=快速看到结果，50轮=充分训练但可能过拟合"}] },
+  { key: "CNN", name: "小型CNN", desc: "3×3卷积(4f)→池化→FC", category: "神经网络", params: [{key:"filters",label:"卷积核数",default:4,min:2,max:8,step:2,help:"扫图像的「放大镜」数量。2个看2种特征，8个看8种特征但更慢"},{key:"epochs",label:"训练轮数",default:20,min:10,max:40,step:10,help:"CNN通常20轮就收敛。可在损失曲线下降变慢后考虑增加轮数"}] },
   { key: "RANDOM", name: "随机基线", desc: "10选1随机猜", category: "baseline", params: [] },
 ];
 
@@ -196,19 +196,17 @@ function Stage1() {
 function Stage4() {
   const store = useImageRecogStore();
   const isShape = store.experimentType === "shape";
-  const [expandedInfo, setExpandedInfo] = useState<string | null>(null);
-  const [expandedParam, setExpandedParam] = useState<string | null>(null);
-
+  const [infoAlgo, setInfoAlgo] = useState<string | null>(null);
   const algoList = isShape ? SHAPE_ALGOS : DIGIT_ALGOS;
   const selected = store.selectedAlgos;
 
   const toggle = (key: string) => {
     if (selected.includes(key)) {
       store.set({ selectedAlgos: selected.filter(x => x !== key) });
-      if (expandedParam === key) setExpandedParam(null);
-      if (expandedInfo === key) setExpandedInfo(null);
+      if (infoAlgo === key) setInfoAlgo(null);
     } else {
       store.set({ selectedAlgos: [...selected, key] });
+      setInfoAlgo(key);
       const defaults = getDefaultAlgoParams(key);
       if (Object.keys(defaults).length > 0) {
         const current = { ...store.algoParams };
@@ -218,79 +216,71 @@ function Stage4() {
     }
   };
 
+  const info = infoAlgo ? ALGO_INFO[infoAlgo] ?? null : null;
+
   return (
     <StageContainer step={2} title="设计实验" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("TASK_SELECTED")}>← 上一步</button><button className="btn-primary" onClick={() => { store.set({ designCompleted: true, experimentResult: null }); store.setStage("EXPERIMENT_RUNNING"); }} disabled={selected.length === 0}>下一步 → 运行实验</button></div>}>
       <div className="card">
         <h2 className="font-semibold text-gray-700 mb-3">
-          选择要比较的算法 <span className="text-xs font-normal text-gray-400">（点击查看详细原理）</span>
+          选择要比较的算法 <span className="text-xs font-normal text-gray-400">（点击卡片查看原理）</span>
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {algoList.map(a => {
-            const isSel = selected.includes(a.key);
-            const info = ALGO_INFO[a.key];
-            return (
-              <div key={a.key}>
-                <AlgorithmCard name={a.name} description={a.desc} selected={isSel} onToggle={() => toggle(a.key)} />
-
-                {/* 选中后：显示算法解释说明（内联） */}
-                {isSel && info && (
-                  <div className="mt-1.5 p-3 bg-blue-50/50 border border-blue-100 rounded-lg">
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-xs text-gray-600 leading-relaxed">{info.explanation}</p>
-                      <button onClick={() => setExpandedInfo(expandedInfo === a.key ? null : a.key)}
-                        className="text-[10px] text-blue-500 hover:text-blue-700 whitespace-nowrap shrink-0 mt-0.5">
-                        {expandedInfo === a.key ? "收起 ▲" : "更多 ▼"}
-                      </button>
-                    </div>
-
-                    {/* 展开后显示：类比 + 关键点 + 伪代码 */}
-                    {expandedInfo === a.key && (
-                      <div className="mt-2 pt-2 border-t border-blue-100">
-                        <div className="text-[11px] text-gray-500 mb-2">💡 {info.analogy}</div>
-                        <div className="flex flex-wrap gap-1 mb-2">
-                          {info.key_points.map(p => <span key={p} className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">{p}</span>)}
-                        </div>
-                        {info.pseudocode && (
-                          <details className="text-xs">
-                            <summary className="cursor-pointer text-gray-400 hover:text-gray-600">▶ 伪代码</summary>
-                            <pre className="bg-gray-900 text-green-400 p-2 rounded mt-1 overflow-x-auto text-[10px] leading-relaxed whitespace-pre font-mono">{info.pseudocode}</pre>
-                          </details>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* 参数面板 */}
-                {isSel && a.params.length > 0 && (
-                  <div className="mt-1 px-1">
-                    <button onClick={() => setExpandedParam(expandedParam === a.key ? null : a.key)}
-                      className="text-[10px] text-gray-400 hover:text-gray-600">
-                      {expandedParam === a.key ? "收起参数 ▲" : "调整参数 ▼"}
-                    </button>
-                    {expandedParam === a.key && (
-                      <div className="mt-1.5 p-2 bg-gray-50 rounded-lg border border-gray-100 space-y-2">
-                        {a.params.map(p => {
-                          const curVal = store.algoParams[a.key]?.[p.key] ?? p.default;
-                          return (
-                            <div key={p.key} className="flex items-center gap-2">
-                              <span className="text-[11px] text-gray-500 w-20">{p.label}</span>
-                              <input type="range" min={p.min} max={p.max} step={p.step} value={curVal}
-                                onChange={e => store.set({ algoParams: { ...store.algoParams, [a.key]: { ...store.algoParams[a.key], [p.key]: Number(e.target.value) } } })}
-                                className="flex-1 h-1 accent-blue-500" />
-                              <span className="text-[11px] font-mono text-gray-700 w-8 text-right">{curVal}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          {algoList.map(a => (
+            <div key={a.key}>
+              <AlgorithmCard name={a.name} description={a.desc} selected={selected.includes(a.key)} onToggle={() => toggle(a.key)} />
+            </div>
+          ))}
         </div>
       </div>
+
+      {/* 算法原理面板 */}
+      {info && (
+        <div className="card border-blue-200 bg-blue-50/30">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-semibold text-gray-800">{algoList.find(a => a.key === infoAlgo)?.name} 算法原理</h2>
+            <button onClick={() => setInfoAlgo(null)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
+          </div>
+          <p className="text-sm text-gray-600 mb-3">{info.explanation}</p>
+          <div className="text-xs text-gray-500 mb-3 p-2 bg-white rounded-lg border border-blue-100">💡 {info.analogy}</div>
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {info.key_points.map(p => <span key={p} className="text-[11px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{p}</span>)}
+          </div>
+          {info.pseudocode && (
+            <details className="text-xs">
+              <summary className="cursor-pointer text-gray-500 hover:text-gray-700 mb-1">▶ 伪代码</summary>
+              <pre className="bg-gray-900 text-green-400 p-3 rounded-lg overflow-x-auto text-[11px] leading-relaxed whitespace-pre font-mono">{info.pseudocode}</pre>
+            </details>
+          )}
+        </div>
+      )}
+
+      {/* 参数面板 */}
+      {infoAlgo && (() => {
+        const a = algoList.find(x => x.key === infoAlgo);
+        if (!a || a.params.length === 0) return null;
+        return (
+          <div className="card">
+            <h2 className="font-semibold text-gray-700 mb-3">调整参数 — {a.name}</h2>
+            <div className="space-y-3">
+              {a.params.map(p => {
+                const curVal = store.algoParams[a.key]?.[p.key] ?? p.default;
+                return (
+                  <div key={p.key}>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-600 w-24 font-medium">{p.label}</span>
+                      <input type="range" min={p.min} max={p.max} step={p.step} value={curVal}
+                        onChange={e => store.set({ algoParams: { ...store.algoParams, [a.key]: { ...store.algoParams[a.key], [p.key]: Number(e.target.value) } } })}
+                        className="flex-1 h-1 accent-blue-500" />
+                      <span className="text-xs font-mono text-gray-700 w-8 text-right">{curVal}</span>
+                    </div>
+                    {p.help && <p className="text-[10px] text-gray-400 mt-1 ml-24 leading-relaxed">{p.help}</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="card"><h3 className="font-semibold text-gray-700 mb-2 text-sm">数据量</h3><div className="space-y-1">{SAMPLE_SIZES.map(n => <button key={n} onClick={() => store.set({ nSamples: n })} className={`block w-full text-left px-3 py-1.5 rounded text-sm ${store.nSamples === n ? "bg-gray-900 text-white font-medium" : "text-gray-500 hover:bg-gray-50"}`}>{n} 个样本</button>)}</div></div>
@@ -301,17 +291,14 @@ function Stage4() {
   );
 }
 
-// ═══════ Stage5: 运行实验（训练→测试→结果） ═══════
-
 interface AlgoProgress {
   algoKey: string;
   phase: "waiting" | "training" | "trained" | "testing" | "done";
   tested: number; total: number;
   trainEpoch?: number; trainTotal?: number;
   params: Record<string, number>;
-  accuracy?: number;
-  runtimeMs?: number;
-  vizSteps?: VisualizerStep[];
+  accuracy?: number; runtimeMs?: number;
+  vizSteps?: any[];
   message: string;
 }
 

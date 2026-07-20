@@ -10,7 +10,7 @@ import FlowStepper from "../components/FlowStepper";
 import StageContainer from "../components/StageContainer";
 import TrainingCurve from "../components/TrainingCurve";
 import { useMNISTStore, computeConfigFingerprint } from "../stores/mnistStore";
-import { saveQuestion, saveAnalysis, callMentor, callDataAnalyst, hasAgentConfig, logAgentError, checkMNISTDeps } from "../api/service";
+import { saveQuestion, saveAnalysis, callMentor, callDataAnalyst, hasAgentConfig, logAgentError } from "../api/service";
 import { archiveSession } from "./Archive";
 import type { ResearchStage } from "../types";
 
@@ -38,6 +38,29 @@ const ARCHITECTURES = [
   { id: "deepcnn", name: "DeepCNN", desc: "4层卷积+Dropout，871K参数", params: "871K" },
   { id: "mlp", name: "MLP", desc: "纯全连接网络，536K参数", params: "536K" },
 ];
+
+const ARCH_INFO: Record<string, { explanation: string; analogy: string; key_points: string[] }> = {
+  minicnn: {
+    explanation: "MiniCNN 是最简单的卷积神经网络——只有1层卷积提取特征，然后直接全连接分类。虽然简单但已经能学到数字的基本笔画特征，适合入门理解 CNN 的工作原理。32K 参数意味着模型很小，训练非常快。",
+    analogy: "就像用一个放大镜看数字——只看一次整体特征（边、角），然后直接判断是几。简单但有效！",
+    key_points: ["1层卷积(16核)", "MaxPool降维", "极简32K参数", "训练最快"],
+  },
+  standardcnn: {
+    explanation: "StandardCNN 是 MNIST 最常用的标准结构——2层卷积逐层提取从简单到复杂的特征，配合 Dropout 防止过拟合。422K 参数在速度与精度之间取得了很好的平衡，通常能达到 98%+ 的准确率。",
+    analogy: "先用粗放大镜看大致轮廓（第1层卷积），再用细放大镜看细节笔画（第2层卷积），最后综合判断。",
+    key_points: ["2层卷积(32→64核)", "Dropout防过拟合", "422K参数", "MNIST最优选"],
+  },
+  deepcnn: {
+    explanation: "DeepCNN 是较深的卷积网络，4层卷积可以学到更复杂的特征组合。871K 参数让模型有更强的表达能力，但也更容易过拟合——所以用了更大的 Dropout(0.5) 来防止。适合研究网络深度对性能的影响。",
+    analogy: "用四个不同倍率的放大镜逐层观察——每个放大镜提取不同层次的特征，信息更丰富但也更容易被噪声干扰。",
+    key_points: ["4层卷积", "大Dropout(0.5)", "871K参数", "感受野更大"],
+  },
+  mlp: {
+    explanation: "MLP 是全连接网络——没有卷积层，直接把 28×28=784 个像素拉平成一维向量输入。无法利用图像的空间结构（相邻像素的关系），所以同参数量下通常不如 CNN。用来对比「CNN 为什么更适合图像」。",
+    analogy: "不看图像的整体结构，而是把 784 个像素当成 784 个独立的数字——完全不知道哪些像素是相邻的。",
+    key_points: ["纯全连接", "无卷积/池化", "536K参数", "图像任务对比基准"],
+  },
+};
 
 const HYPER_OPTIONS = {
   learningRate: [0.001, 0.01, 0.1] as number[],
@@ -115,14 +138,6 @@ export default function MNISTWorkbench() {
   const store = useMNISTStore();
   const initDoneRef = useRef(false);
   const mountStateRef = useRef(location.state);
-  const [depsError, setDepsError] = useState<string | null>(null);
-
-  // ── MNIST 依赖预检 ──
-  useEffect(() => {
-    checkMNISTDeps().then((r: any) => {
-      if (!r.deps_ok) setDepsError(r.error || "MNIST 依赖检查失败");
-    }).catch(() => {});
-  }, []);
 
   // 幂等初始化
   useEffect(() => {
@@ -141,7 +156,6 @@ export default function MNISTWorkbench() {
   if (store.sessionId === null) return null;
   return (
     <Layout>
-      {depsError && <div className="bg-red-600 text-white px-4 py-2.5 text-sm font-medium text-center">⚠️ {depsError}</div>}
       <div className="flex" style={{ minHeight: "calc(100vh - 56px)" }}>
         <aside className="w-64 bg-white border-r border-gray-200 p-4 flex-shrink-0">
           <h1 className="text-lg font-bold text-gray-800 mb-2">研究工作台</h1>
@@ -248,6 +262,22 @@ function Stage2() {
         </div>
         <div className="text-xs text-gray-400 bg-gray-100 rounded-lg p-2 font-mono">维度: {archInfo.dimensions}</div>
       </div>
+
+      {/* 架构原理说明 */}
+      {(() => {
+        const ai = ARCH_INFO[store.selectedArchitecture];
+        if (!ai) return null;
+        return (
+          <div className="card border-blue-200 bg-blue-50/30">
+            <h2 className="font-semibold text-gray-800 mb-2">{ARCHITECTURES.find(a => a.id === store.selectedArchitecture)?.name} 原理</h2>
+            <p className="text-sm text-gray-600 mb-3">{ai.explanation}</p>
+            <div className="text-xs text-gray-500 mb-3 p-2 bg-white rounded-lg border border-blue-100">💡 {ai.analogy}</div>
+            <div className="flex flex-wrap gap-1.5">
+              {ai.key_points.map(p => <span key={p} className="text-[11px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{p}</span>)}
+            </div>
+          </div>
+        );
+      })()}
       <div className="card">
         <h2 className="font-semibold text-gray-700 mb-3">超参数设置</h2>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -327,13 +357,13 @@ function Stage3() {
   const startTraining = () => {
     if (doneRef.current) return;
     doneRef.current = true;
-    // ★ 关键：先同步设置状态让 React 立即 re-render，再启动异步任务
     setRunning(true);
     setCurveData([]);
     setCurEpoch(0);
     setTotEpochs(0);
     setEpochLog([]);
     setErrorDetail(null);
+    setRecogDemo(null);
     setPhaseText("正在连接后端服务...");
     curveRef.current = [];
     store.set({ isTraining: true });
@@ -625,28 +655,31 @@ function Stage7() {
   );
 }
 
-// ── MNIST 手写数字识别演示（Canvas 逐行扫描动画） ──
+// ── 模型识别验证（Canvas 逐行扫描动画） ──
 
 function RecogDemo({ samples }: { samples: any[]; accuracy?: string }) {
   const [frame, setFrame] = useState(0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const CELL = 6; const SIZE = 28 * CELL;
+  const totalFrames = samples.length * 60;
+  const done = frame >= totalFrames;
 
   useEffect(() => {
     if (samples.length === 0) return;
     const interval = setInterval(() => {
       setFrame(prev => {
-        if (prev >= samples.length * 60) { clearInterval(interval); return prev; }
+        if (prev >= totalFrames) { clearInterval(interval); return prev; }
         return prev + 1;
       });
     }, 40);
     return () => clearInterval(interval);
-  }, [samples.length]);
+  }, [samples.length, totalFrames]);
 
-  const curIdx = Math.min(Math.floor(frame / 60), samples.length - 1);
-  const animPhase = frame % 60;
-  const scanLines = Math.min(Math.round(animPhase / 25 * 28), 28);
-  const showResult = animPhase >= 26;
+  // 动画完成后锁定在最后一个样本（扫描完成 + 结果显示）
+  const curIdx = done ? samples.length - 1 : Math.min(Math.floor(frame / 60), samples.length - 1);
+  const animPhase = done ? 40 : frame % 60;  // done 后锁定在 showResult 阶段
+  const scanLines = done ? 28 : Math.min(Math.round(animPhase / 25 * 28), 28);
+  const showResult = done || animPhase >= 26;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -688,7 +721,8 @@ function RecogDemo({ samples }: { samples: any[]; accuracy?: string }) {
 
   return (
     <div className="card">
-      <h2 className="font-semibold text-gray-700 mb-3">手写数字识别演示</h2>
+      <h2 className="font-semibold text-gray-700 mb-1">模型识别验证</h2>
+      <p className="text-xs text-gray-400 mb-3">用训练好的模型识别 8 个真实 MNIST 测试样本，验证模型效果</p>
       <div className="flex items-start gap-4">
         <div className="flex flex-col items-center">
           <canvas ref={canvasRef} style={{ width: SIZE, height: SIZE, imageRendering: "pixelated" }} className="rounded-lg border border-gray-200" />
@@ -706,7 +740,7 @@ function RecogDemo({ samples }: { samples: any[]; accuracy?: string }) {
             </p>
           )}
           <p className="text-xs text-gray-400 mt-2">
-            演示结果: {correctCount}/{samples.length} 正确识别 ({((correctCount / samples.length) * 100).toFixed(0)}%)
+            模型识别准确率: {correctCount}/{samples.length} ({((correctCount / samples.length) * 100).toFixed(0)}%)
           </p>
         </div>
       </div>
