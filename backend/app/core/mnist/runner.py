@@ -1,28 +1,167 @@
 """MNIST 训练 Runner — PyTorch 实现，epoch 级 SSE 流式输出
 
-设备兼容：自动检测 GPU(CUDA/MPS) > NPU(Ascend) > CPU，优先使用加速设备。
+设备检测策略（两层）：
+  1. 系统层探测（nvidia-smi / npu-smi / /dev/davinci / uname）→ 知道物理硬件
+  2. PyTorch 层匹配（torch.cuda / torch.mps / torch.npu）→ 确认驱动和库就绪
+
+优先级：CUDA > MPS(Apple) > NPU(Ascend) > CPU
+若检测到 NPU 硬件但 torch-npu 未安装，会明确提示安装命令。
 """
 import time
 import json
+import subprocess
+import platform
+import os
+from pathlib import Path
+
+
+def _probe_hardware() -> dict:
+    """系统层探测：不依赖 torch，直接检查 nvidia-smi / npu-smi / /dev/davinci。
+    返回各加速器的检测状态、消息和安装提示。"""
+    hw: dict = {
+        "cuda": {"type": "cuda", "label": "NVIDIA GPU", "detected": False, "ready": False,
+                 "message": "", "install_hint": ""},
+        "npu":  {"type": "npu",  "label": "华为昇腾 NPU", "detected": False, "ready": False,
+                 "message": "", "install_hint": ""},
+        "mps":  {"type": "mps",  "label": "Apple MPS", "detected": False, "ready": False,
+                 "message": "", "install_hint": ""},
+        "cpu":  {"type": "cpu",  "label": "CPU", "detected": True, "ready": True,
+                 "message": "CPU 始终可用", "install_hint": ""},
+    }
+
+    # ── 探测 NVIDIA GPU ──
+    try:
+        r = subprocess.run(
+            ["nvidia-smi", "-L"], capture_output=True, text=True, timeout=5
+        )
+        if r.returncode == 0 and "GPU" in r.stdout:
+            gpu_lines = [l for l in r.stdout.splitlines() if l.strip().startswith("GPU")]
+            hw["cuda"]["detected"] = True
+            hw["cuda"]["message"] = f"检测到 {len(gpu_lines)} 个 NVIDIA GPU"
+            hw["cuda"]["install_hint"] = (
+                "pip install torch --index-url https://download.pytorch.org/whl/cu121"
+            )
+    except Exception:
+        pass
+
+    # ── 探测华为昇腾 NPU ──
+    npu_detected = False
+    try:
+        r = subprocess.run(
+            ["npu-smi", "info", "-l"], capture_output=True, text=True, timeout=5
+        )
+        if r.returncode == 0:
+            npu_detected = True
+    except Exception:
+        pass
+    if not npu_detected:
+        try:
+            davinci = list(Path("/dev").glob("davinci*"))
+            if davinci:
+                npu_detected = True
+        except Exception:
+            pass
+    if npu_detected:
+        hw["npu"]["detected"] = True
+        hw["npu"]["message"] = "检测到华为昇腾 NPU 硬件"
+        hw["npu"]["install_hint"] = (
+            "请安装 torch-npu（Ascend 版 PyTorch），参考: "
+            "https://gitee.com/ascend/pytorch"
+        )
+
+    # ── 探测 Apple MPS ──
+    if platform.system() == "Darwin" and platform.machine() == "arm64":
+        hw["mps"]["detected"] = True
+        hw["mps"]["message"] = "检测到 Apple Silicon (MPS 可用)"
+
+    return hw
 
 
 def _detect_device():
-    """自动检测最佳可用设备：CUDA > MPS(macOS) > NPU(Ascend) > CPU"""
+    """自动检测最佳可用设备并返回诊断信息。
+    返回: (torch.device, diagnostic_dict)
+
+    diagnostic_dict 包含:
+      - hardware: _probe_hardware() 的原始结果
+      - detected: 系统层探测到的加速器列表
+      - selected: 最终选用的设备类型字符串
+      - usable: torch 层确认可用的加速器列表
+      - warnings: 诊断警告（如"有 NPU 硬件但缺 torch-npu"）
+      - messages: 完整状态消息列表
+    """
     import torch
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if (
-        hasattr(torch, "backends")
-        and hasattr(torch.backends, "mps")
-        and torch.backends.mps.is_available()
-    ):
-        return torch.device("mps")
-    try:
-        if torch.npu.is_available():
-            return torch.device("npu")
-    except (AttributeError, RuntimeError):
-        pass
-    return torch.device("cpu")
+
+    hw = _probe_hardware()
+    detected = [k for k in ("cuda", "npu", "mps") if hw[k]["detected"]]
+    usable: list[str] = []
+    warnings: list[str] = []
+    messages: list[str] = []
+
+    # ── 1. CUDA ──
+    cuda_ok = torch.cuda.is_available()
+    if cuda_ok:
+        usable.append("cuda")
+        hw["cuda"]["ready"] = True
+        name = torch.cuda.get_device_name(0) if torch.cuda.device_count() > 0 else "GPU"
+        messages.append(f"✓ CUDA 可用 — {name}")
+        device = torch.device("cuda")
+    else:
+        if hw["cuda"]["detected"]:
+            warnings.append(
+                f"检测到 NVIDIA GPU 硬件但 PyTorch CUDA 不可用。"
+                f"请确认已安装 CUDA 版 PyTorch: {hw['cuda']['install_hint']}"
+            )
+        # ── 2. MPS (macOS) ──
+        mps_ok = (
+            hasattr(torch, "backends")
+            and hasattr(torch.backends, "mps")
+            and torch.backends.mps.is_available()
+        )
+        if mps_ok:
+            usable.append("mps")
+            hw["mps"]["ready"] = True
+            messages.append("✓ Apple MPS 可用")
+            device = torch.device("mps")
+        else:
+            # ── 3. NPU (Ascend) ──
+            npu_ok = False
+            try:
+                if hasattr(torch, "npu") and torch.npu.is_available():
+                    npu_ok = True
+            except Exception:
+                pass
+            if npu_ok:
+                usable.append("npu")
+                hw["npu"]["ready"] = True
+                try:
+                    name = torch.npu.get_device_name(0)
+                except Exception:
+                    name = "Ascend NPU"
+                messages.append(f"✓ 华为昇腾 NPU 可用 — {name}")
+                device = torch.device("npu")
+            else:
+                # ── 4. CPU（兜底）+ 诊断 ──
+                if hw["npu"]["detected"]:
+                    warnings.append(
+                        f"⚠️ 检测到华为昇腾 NPU 硬件，但 torch-npu 未安装或不可用。"
+                        f"{hw['npu']['install_hint']}"
+                    )
+                if hw["cuda"]["detected"] and not cuda_ok:
+                    pass  # CUDA 警告已在上面添加
+                if not detected:
+                    messages.append("未检测到 GPU/NPU 加速器")
+                messages.append("使用 CPU 进行训练")
+                device = torch.device("cpu")
+
+    diag = {
+        "hardware": hw,
+        "detected": detected,
+        "selected": device.type,
+        "usable": usable,
+        "warnings": warnings,
+        "messages": messages,
+    }
+    return device, diag
 
 
 class MNISTRunner:
@@ -53,6 +192,112 @@ class MNISTRunner:
                 model.parameters(), lr=lr, momentum=hp.get("momentum", 0.9)
             )
 
+    @staticmethod
+    def _sample_device_utilization(device) -> dict:
+        """采集真实设备使用率（内存 + 计算），跨 CUDA/NPU/MPS/CPU 兼容。
+        返回 dict 含 memory_util/compute_util 等字段，采集失败返回 {}。"""
+        import torch
+
+        result: dict = {}
+        try:
+            if device.type == "cuda":
+                # ── CUDA: 内置内存统计 + nvidia-smi 计算利用率（若可用）──
+                allocated = torch.cuda.memory_allocated(device)
+                total = torch.cuda.get_device_properties(device).total_memory
+                result["memory_util"] = round(allocated / total * 100, 1)
+                result["memory_allocated_mb"] = round(allocated / 1024 / 1024, 1)
+                result["memory_total_mb"] = round(total / 1024 / 1024, 1)
+
+                # 尝试通过 nvidia-smi 获取 GPU 计算利用率（首次调用较慢，约 50ms）
+                if not hasattr(MNISTRunner, "_nvsmi_ok"):
+                    try:
+                        import subprocess
+                        r = subprocess.run(
+                            ["nvidia-smi", "--query-gpu=utilization.gpu",
+                             "--format=csv,noheader,nounits",
+                             f"--id={device.index or 0}"],
+                            capture_output=True, text=True, timeout=2,
+                        )
+                        MNISTRunner._nvsmi_ok = (r.returncode == 0)
+                    except Exception:
+                        MNISTRunner._nvsmi_ok = False
+
+                if MNISTRunner._nvsmi_ok:
+                    try:
+                        import subprocess
+                        r = subprocess.run(
+                            ["nvidia-smi", "--query-gpu=utilization.gpu",
+                             "--format=csv,noheader,nounits",
+                             f"--id={device.index or 0}"],
+                            capture_output=True, text=True, timeout=1,
+                        )
+                        if r.returncode == 0:
+                            result["compute_util"] = float(r.stdout.strip())
+                    except Exception:
+                        pass
+
+            elif device.type == "npu":
+                # ── NPU (华为 Ascend): torch.npu 内存统计 ──
+                try:
+                    allocated = torch.npu.memory_allocated(device)
+                    total = torch.npu.get_device_properties(device).total_memory
+                    result["memory_util"] = round(allocated / total * 100, 1)
+                    result["memory_allocated_mb"] = round(allocated / 1024 / 1024, 1)
+                    result["memory_total_mb"] = round(total / 1024 / 1024, 1)
+                except Exception:
+                    pass
+
+                # 尝试通过 npu-smi 获取 NPU 计算利用率
+                if not hasattr(MNISTRunner, "_npu_smi_ok"):
+                    try:
+                        import subprocess
+                        r = subprocess.run(
+                            ["npu-smi", "info", "-t", "usg", "-i", "0"],
+                            capture_output=True, text=True, timeout=2,
+                        )
+                        MNISTRunner._npu_smi_ok = (r.returncode == 0)
+                    except Exception:
+                        MNISTRunner._npu_smi_ok = False
+
+                if MNISTRunner._npu_smi_ok:
+                    try:
+                        import subprocess
+                        r = subprocess.run(
+                            ["npu-smi", "info", "-t", "usg", "-i", "0"],
+                            capture_output=True, text=True, timeout=1,
+                        )
+                        if r.returncode == 0:
+                            import re
+                            m = re.search(r"(\d+)", r.stdout)
+                            if m:
+                                result["compute_util"] = float(m.group(1))
+                    except Exception:
+                        pass
+
+            elif device.type == "mps":
+                # ── Apple MPS: 内存统计 ──
+                try:
+                    allocated = torch.mps.current_allocated_memory()
+                    driver = torch.mps.driver_allocated_memory()
+                    if driver > 0:
+                        result["memory_util"] = round(allocated / driver * 100, 1)
+                        result["memory_allocated_mb"] = round(allocated / 1024 / 1024, 1)
+                except Exception:
+                    pass
+
+            elif device.type == "cpu":
+                # ── CPU: psutil 计算利用率 ──
+                try:
+                    import psutil
+                    result["compute_util"] = round(psutil.cpu_percent(interval=0.0), 1)
+                except Exception:
+                    pass
+
+        except Exception:
+            pass
+
+        return result
+
     def run_stream(self, config: dict):
         try:
             import numpy as np
@@ -62,9 +307,32 @@ class MNISTRunner:
             from torchvision import datasets
         except ModuleNotFoundError as e:
             pkg = getattr(e, "name", str(e))
+            # 即使 torch 未安装，也探测一下系统硬件给出更精准的安装建议
+            hw = _probe_hardware()
+            detected = [k for k in ("cuda", "npu", "mps") if hw[k]["detected"]]
+            hints: list[str] = []
+            if "npu" in detected:
+                hints.append(hw["npu"]["install_hint"])
+            if "cuda" in detected:
+                hints.append(hw["cuda"]["install_hint"])
+            hint_text = "。".join(hints) if hints else "请在 backend/.venv 中执行: pip install torch torchvision numpy"
+
+            yield {
+                "type": "device_info",
+                "device": "none",
+                "selected": "none",
+                "detected": detected,
+                "usable": [],
+                "warnings": [f"缺少依赖包: {pkg}"],
+                "messages": [f"缺少依赖包: {pkg}。{hint_text}"],
+                "hardware": {
+                    k: {kk: vv for kk, vv in v.items() if kk in ("type", "label", "detected", "ready", "message", "install_hint")}
+                    for k, v in hw.items()
+                },
+            }
             yield {
                 "type": "error",
-                "message": f"缺少依赖包: {pkg}。请在 backend/.venv 中执行: pip install torch torchvision numpy",
+                "message": f"缺少依赖包: {pkg}。{hint_text}",
             }
             return
 
@@ -85,10 +353,25 @@ class MNISTRunner:
         torch.manual_seed(seed)
         np.random.seed(seed)
 
-        device = _detect_device()
+        device, device_diag = _detect_device()
         epochs = hp.get("epochs", 10)
         batch_size = hp.get("batch_size", 64)
         transform = self._get_transform()
+
+        # ── 设备诊断信息（始终先于 train_start 发送，即使 torchnpu 缺包也发送）──
+        yield {
+            "type": "device_info",
+            "device": str(device),
+            "selected": device_diag["selected"],
+            "detected": device_diag["detected"],
+            "usable": device_diag["usable"],
+            "warnings": device_diag["warnings"],
+            "messages": device_diag["messages"],
+            "hardware": {
+                k: {kk: vv for kk, vv in v.items() if kk in ("type", "label", "detected", "ready", "message", "install_hint")}
+                for k, v in device_diag["hardware"].items()
+            },
+        }
 
         yield {
             "type": "train_start",
@@ -98,6 +381,11 @@ class MNISTRunner:
             "device": str(device),
             "message": f"加载 MNIST 数据集... 设备: {device}",
         }
+        # 初始设备使用率（加载数据集后）
+        init_util = MNISTRunner._sample_device_utilization(device)
+        if init_util:
+            yield {"type": "device_util", "epoch": 0, "total_epochs": epochs,
+                   "device": str(device), **init_util}
 
         try:
             full_dataset = datasets.MNIST(
@@ -192,6 +480,11 @@ class MNISTRunner:
                     f"train_acc={train_acc_avg*100:.1f}% val_acc={val_acc_avg*100:.1f}%"
                 ),
             }
+            # 每 epoch 后采样真实设备使用率
+            dev_util = MNISTRunner._sample_device_utilization(device)
+            if dev_util:
+                yield {"type": "device_util", "epoch": epoch + 1,
+                       "total_epochs": epochs, "device": str(device), **dev_util}
 
         # ── 最终测试：混淆矩阵 + 错误案例 ──
         if best_epoch > 0:
@@ -247,6 +540,11 @@ class MNISTRunner:
             "training_time": training_time,
             "message": f"训练完成! 测试准确率 {test_acc*100:.1f}% (最佳epoch: {best_epoch})",
         }
+        # 训练完成后的设备使用率快照
+        done_util = MNISTRunner._sample_device_utilization(device)
+        if done_util:
+            yield {"type": "device_util", "epoch": epochs, "total_epochs": epochs,
+                   "device": str(device), **done_util}
 
         # ── 识别演示：随机选 8 个测试样本 ──
         demo_samples = []

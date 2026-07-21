@@ -319,7 +319,10 @@ function Stage3() {
   const [totEpochs, setTotEpochs] = useState(0);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [device, setDevice] = useState<string>("");            // CPU / CUDA / NPU / MPS
-  const [deviceUtil, setDeviceUtil] = useState(0);              // 0-100 使用率
+  const [deviceUtil, setDeviceUtil] = useState(0);              // 0-100 使用率（来自真实设备采样）
+  const [deviceUtilLabel, setDeviceUtilLabel] = useState("");   // "compute" | "memory" | ""
+  const [deviceWarnings, setDeviceWarnings] = useState<string[]>([]);  // 设备诊断警告
+  const [deviceMessages, setDeviceMessages] = useState<string[]>([]);  // 设备诊断消息
   const [recogDemo, setRecogDemo] = useState<{ samples: any[]; accuracy: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const curveRef = useRef<typeof curveData>([]);
@@ -413,16 +416,32 @@ function Stage3() {
           try { event = JSON.parse(trimmed.slice(6)); } catch (e) { buffer = trimmed + "\n\n" + buffer; continue; }
 
           switch (event.type) {
+            case "device_info":
+              // 后端设备检测诊断信息（最先到达）
+              setDevice(event.selected || event.device || "CPU");
+              setDeviceUtil(0);
+              setDeviceWarnings(event.warnings || []);
+              setDeviceMessages(event.messages || []);
+              break;
             case "train_start": setTotEpochs(event.epochs); setDevice(event.device || "CPU"); setDeviceUtil(0); setPhaseText(event.message || "加载数据中..."); break;
             case "epoch_start": setCurEpoch(event.epoch || 1); break;
             case "epoch_end": {
               const ep = { epoch: event.epoch, train_loss: event.train_loss, val_loss: event.val_loss, train_acc: event.train_acc, val_acc: event.val_acc };
               curveRef.current = [...curveRef.current, ep]; setCurveData([...curveRef.current]);
               setCurEpoch(event.epoch);
-              setDeviceUtil(Math.round(event.epoch / event.total_epochs * 100));
               setEpochLog(prev => [...prev.slice(-20), `[Epoch ${event.epoch}/${event.total_epochs}] train_loss: ${event.train_loss.toFixed(4)}  train_acc: ${(event.train_acc*100).toFixed(1)}%  val_acc: ${(event.val_acc*100).toFixed(1)}%`]);
               break;
             }
+            case "device_util":
+              // 真实设备使用率（后端采样）：优先显示计算利用率，其次内存利用率
+              if (event.compute_util != null) {
+                setDeviceUtil(Math.round(event.compute_util));
+                setDeviceUtilLabel("compute");
+              } else if (event.memory_util != null) {
+                setDeviceUtil(Math.round(event.memory_util));
+                setDeviceUtilLabel("memory");
+              }
+              break;
             case "train_done": setPhaseText(event.message || `训练完成! 测试准确率 ${((event.test_acc||0)*100).toFixed(1)}%`); break;
             case "done":
               setPhaseText(event.message || "实验完成");
@@ -465,15 +484,38 @@ function Stage3() {
       {/* 训练曲线 + 设备使用率 */}
       {(running || result) && (
         <div className="card">
-          {/* 设备使用率条 */}
+          {/* 设备诊断警告（NPU 硬件已检测但 torch-npu 缺失等） */}
+          {deviceWarnings.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3">
+              {deviceWarnings.map((w, i) => (
+                <p key={i} className="text-xs text-amber-700 leading-relaxed">{w}</p>
+              ))}
+            </div>
+          )}
+          {/* 设备诊断消息（选用的设备、安装提示等） */}
+          {deviceMessages.length > 0 && (
+            <div className="bg-blue-50 border border-blue-100 rounded-lg p-2 mb-3">
+              {deviceMessages.map((m, i) => (
+                <p key={i} className="text-[11px] text-blue-600 leading-relaxed">{m}</p>
+              ))}
+            </div>
+          )}
+          {/* 设备使用率条（后端实时采样，非 epoch 进度） */}
           {device && (
             <div className="flex items-center gap-3 mb-3">
               <span className="text-[10px] font-medium text-gray-500 uppercase w-12">{device}</span>
               <div className="flex-1 bg-gray-200 rounded-full h-2">
                 <div className="h-2 rounded-full bg-gradient-to-r from-blue-400 to-purple-500 transition-all duration-500"
-                  style={{ width: `${running ? deviceUtil : 0}%` }} />
+                  style={{ width: `${running || result ? deviceUtil : 0}%` }} />
               </div>
-              <span className="text-[10px] text-gray-400 w-10 text-right">{running ? `${deviceUtil}%` : "—"}</span>
+              <span className="text-[10px] text-gray-400 w-10 text-right">
+                {running || result ? `${deviceUtil}%` : "—"}
+              </span>
+              {deviceUtilLabel && (
+                <span className="text-[9px] text-gray-300">
+                  {deviceUtilLabel === "compute" ? "算力" : "显存"}
+                </span>
+              )}
             </div>
           )}
           {/* 训练中标注 */}

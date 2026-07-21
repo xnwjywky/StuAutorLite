@@ -6,7 +6,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session as DbSession
 from pydantic import BaseModel, Field
 from app.models.database import get_db, Session as SessionModel, MNISTRun
-from app.core.mnist.runner import MNISTRunner
+from app.core.mnist.runner import MNISTRunner, _probe_hardware, _detect_device
 from app.core.mnist.architectures import PRESET_ARCHITECTURES, get_architecture
 
 router = APIRouter(prefix="/mnist", tags=["mnist"])
@@ -22,9 +22,6 @@ if not _mnist_log.handlers:
     _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
     _mnist_log.addHandler(_fh)
 
-# ── 不在此处预检依赖（Git Bash/WSL 环境下 sys.executable 可能异常）。
-# 依赖检查推迟到 runner.run_stream() 被调用时（有完整的 try/except 保护）。
-
 
 class MNISTRunRequest(BaseModel):
     session_id: int
@@ -38,8 +35,72 @@ class MNISTRunRequest(BaseModel):
 
 @router.get("/check")
 def check_mnist_deps():
-    """预检端点：验证 MNIST API 可用"""
-    return {"deps_ok": True, "error": None, "python": __import__("sys").executable}
+    """预检端点：系统层探测硬件 + torch 层匹配设备，返回完整的设备诊断信息"""
+    # 1. 系统层硬件探测（不依赖 torch）
+    hw = _probe_hardware()
+    detected = [k for k in ("cuda", "npu", "mps") if hw[k]["detected"]]
+
+    # 2. 依赖检查
+    deps = {"torch": False, "torchvision": False, "numpy": False}
+    deps_errors: list[str] = []
+    for pkg in ("torch", "torchvision", "numpy"):
+        try:
+            __import__(pkg)
+            deps[pkg] = True
+        except ImportError:
+            deps_errors.append(pkg)
+
+    # 3. torch 层设备匹配
+    try:
+        import torch
+        device, diag = _detect_device()
+        selected = diag["selected"]
+        usable = diag["usable"]
+        warnings = diag["warnings"]
+        messages = diag["messages"]
+        gpu_details = None
+        if torch.cuda.is_available():
+            gpu_details = {
+                "name": torch.cuda.get_device_name(0),
+                "count": torch.cuda.device_count(),
+                "memory_total_mb": round(
+                    torch.cuda.get_device_properties(0).total_memory / 1024 / 1024, 1
+                ),
+            }
+        npu_details = None
+        try:
+            if hasattr(torch, "npu") and torch.npu.is_available():
+                npu_details = {
+                    "name": torch.npu.get_device_name(0),
+                    "count": torch.npu.device_count(),
+                }
+        except Exception:
+            pass
+    except Exception:
+        selected = "none"
+        usable = []
+        warnings = ["PyTorch 未安装或导入失败"] + deps_errors
+        messages = warnings[:]
+        gpu_details = None
+        npu_details = None
+
+    return {
+        "deps_ok": len(deps_errors) == 0,
+        "deps": deps,
+        "deps_errors": deps_errors,
+        "selected_device": selected,
+        "usable_devices": usable,
+        "detected_hardware": detected,
+        "warnings": warnings,
+        "messages": messages,
+        "hardware_details": {
+            k: {kk: vv for kk, vv in v.items()
+                if kk in ("type", "label", "detected", "ready", "message", "install_hint")}
+            for k, v in hw.items()
+        },
+        "gpu_details": gpu_details,
+        "npu_details": npu_details,
+    }
 
 
 @router.get("/architectures")
