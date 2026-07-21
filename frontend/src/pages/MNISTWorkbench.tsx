@@ -375,7 +375,7 @@ function Stage3() {
     const ac = new AbortController();
     abortRef.current = ac;
     try {
-      const baseUrl = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+      const baseUrl = import.meta.env.VITE_API_BASE_URL || "";
       const body = { session_id: store.sessionId!, architecture: { id: store.selectedArchitecture }, hyperparameters: { learning_rate: hp.learningRate, batch_size: hp.batchSize, epochs: hp.epochs, optimizer: hp.optimizer, momentum: hp.momentum, dropout: hp.dropout }, max_test_samples: store.maxTestSamples };
 
       let resp: Response;

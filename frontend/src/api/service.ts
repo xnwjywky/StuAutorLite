@@ -268,7 +268,7 @@ export async function runImageRecogStream(
   onEvent: (event: any) => void,
   onError: (err: Error) => void,
 ): Promise<void> {
-  const baseUrl = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || "";
   try {
     const resp = await fetch(`${baseUrl}/api/imagerecog/run-stream`, {
       method: "POST",
