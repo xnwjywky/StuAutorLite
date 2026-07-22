@@ -216,6 +216,13 @@ class ModelManager:
     def has_user_model(self, session_id: int) -> bool:
         return (_MODELS_DIR / f"user_{session_id}.pth").exists()
 
+    def delete_user_model(self, session_id: int):
+        """删除用户训练的模型文件。"""
+        pth = _MODELS_DIR / f"user_{session_id}.pth"
+        if pth.exists():
+            pth.unlink()
+            _log.info(f"用户模型 session={session_id} 已删除")
+
     def load_user_model(self, session_id: int, device: str = "cpu") -> nn.Module | None:
         """加载用户训练的模型。"""
         pth = _MODELS_DIR / f"user_{session_id}.pth"

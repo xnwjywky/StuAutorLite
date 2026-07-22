@@ -289,6 +289,15 @@ def check_user_model(session_id: int):
     }
 
 
+@router.delete("/user-model")
+def delete_user_model(session_id: int):
+    """删除指定 session 的用户训练模型（页面退出时调用）。"""
+    from app.core.mnist.model_manager import ModelManager
+    mgr = ModelManager.get_instance()
+    mgr.delete_user_model(int(session_id))
+    return {"deleted": True, "session_id": session_id}
+
+
 def _run_to_dict(r) -> dict:
     return {
         "id": r.id, "session_id": r.session_id, "batch_id": r.batch_id,

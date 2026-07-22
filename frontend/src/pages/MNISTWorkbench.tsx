@@ -153,6 +153,17 @@ export default function MNISTWorkbench() {
     }
   }, [sessionId]);
 
+  // 退出页面时清理用户训练模型，避免影响下次使用
+  useEffect(() => {
+    return () => {
+      const id = Number(sessionId);
+      if (Number.isNaN(id)) return;
+      const baseUrl = import.meta.env.VITE_API_BASE_URL || "";
+      fetch(`${baseUrl}/api/mnist/user-model?session_id=${id}`, { method: "DELETE" })
+        .catch(() => {});
+    };
+  }, [sessionId]);
+
   if (store.sessionId === null) return null;
   return (
     <Layout>
