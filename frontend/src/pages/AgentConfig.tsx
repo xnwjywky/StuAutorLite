@@ -28,7 +28,13 @@ export default function AgentConfigPage() {
   const [unmasked, setUnmasked] = useState<Set<string>>(new Set());
 
   // ── 新配置表单 ──
-  const [form, setForm] = useState({ label: "", apiKey: "", baseUrl: "", model: "", agentNames: [] as string[] });
+  const [form, setForm] = useState({
+    label: "test_key",
+    apiKey: "",
+    baseUrl: "https://api.deepseek.com/anthropic",
+    model: "deepseek-v4-flash",
+    agentNames: [] as string[],
+  });
 
   const toggleUnmask = (id: string) => {
     setUnmasked((prev) => {
@@ -41,7 +47,7 @@ export default function AgentConfigPage() {
   const handleAdd = () => {
     if (!form.label.trim() || !form.apiKey.trim()) return;
     add({ ...form, provider: "openai" as const });
-    setForm({ label: "", apiKey: "", baseUrl: "", model: "", agentNames: [] });
+    setForm({ label: "test_key", apiKey: "", baseUrl: "https://api.deepseek.com/anthropic", model: "deepseek-v4-flash", agentNames: [] });
     setAdding(false);
   };
 

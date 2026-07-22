@@ -1,6 +1,5 @@
 """Abstract base class for classifiers — mirrors algorithms/base.py pattern."""
 import time
-import random
 from abc import ABC, abstractmethod
 
 
@@ -13,17 +12,28 @@ class Classifier(ABC):
         labels = data["labels"]
         n = len(points)
 
-        # Train/test split
-        n_train = max(1, int(n * train_ratio))
-        indices = list(range(n))
-        rng = random.Random(42)
-        rng.shuffle(indices)
-        train_set = set(indices[:n_train])
+        # Train/test split — 分层抽样 + 重排（训练点在前，测试点在后，与 Canvas 兼容）
+        ratio = min(1.0, max(0.1, train_ratio))
+        # 按类别分组
+        class_indices: dict[int, list[int]] = {}
+        for i, lbl in enumerate(labels):
+            class_indices.setdefault(lbl, []).append(i)
 
-        X_train = [points[i] for i in range(n) if i in train_set]
-        y_train = [labels[i] for i in range(n) if i in train_set]
-        X_test = [points[i] for i in range(n) if i not in train_set]
-        y_test = [labels[i] for i in range(n) if i not in train_set]
+        train_idx: list[int] = []
+        test_idx: list[int] = []
+        for lbl, idxs in class_indices.items():
+            n_cls_train = max(1, int(len(idxs) * ratio))
+            train_idx.extend(idxs[:n_cls_train])
+            test_idx.extend(idxs[n_cls_train:])
+
+        X_train = [points[i] for i in train_idx]
+        y_train = [labels[i] for i in train_idx]
+        X_test = [points[i] for i in test_idx]
+        y_test = [labels[i] for i in test_idx]
+        # 重排 points/labels：训练点在前，测试点在后（与 DecisionBoundary Canvas 的视觉效果一致）
+        reordered_points = [points[i] for i in train_idx + test_idx]
+        reordered_labels = [labels[i] for i in train_idx + test_idx]
+        n_train = len(train_idx)
         if not X_test:
             X_test, y_test = X_train[:1], y_train[:1]
 
@@ -62,6 +72,10 @@ class Classifier(ABC):
             "boundary_data": boundary,
             "runtime_ms": runtime_ms,
             "algorithm": self.name,
+            # 重排后的数据（训练点在前，测试点在后，与 Canvas 的顺序划分一致）
+            "points": reordered_points,
+            "labels": reordered_labels,
+            "n_train": n_train,
         }
 
     def _make_boundary(self, points):

@@ -123,7 +123,12 @@ def _detect_device():
             messages.append("✓ Apple MPS 可用")
             device = torch.device("mps")
         else:
-            # ── 3. NPU (Ascend) ──
+                    # ── 3. NPU (Ascend) ──
+            # 先尝试导入 torch_npu 来注册 NPU 后端（Ascend 系统必需此步骤）
+            try:
+                import torch_npu
+            except ImportError:
+                pass
             npu_ok = False
             try:
                 if hasattr(torch, "npu") and torch.npu.is_available():
@@ -239,6 +244,11 @@ class MNISTRunner:
             elif device.type == "npu":
                 # ── NPU (华为 Ascend): torch.npu 内存统计 ──
                 try:
+                    # 确保 torch_npu 已导入（直接调用时可能尚未导入）
+                    try:
+                        import torch_npu
+                    except ImportError:
+                        pass
                     allocated = torch.npu.memory_allocated(device)
                     total = torch.npu.get_device_properties(device).total_memory
                     result["memory_util"] = round(allocated / total * 100, 1)
@@ -302,6 +312,12 @@ class MNISTRunner:
         try:
             import numpy as np
             import torch
+            # 在 NPU (Ascend) 系统上，必须先导入 torch_npu 注册后端，
+            # 否则 torch.nn / torch.cuda 等子模块可能无法正常工作
+            try:
+                import torch_npu
+            except ImportError:
+                pass
             import torch.nn as nn
             from torch.utils.data import DataLoader, random_split
             from torchvision import datasets
@@ -567,6 +583,19 @@ class MNISTRunner:
             "accuracy": f"{sum(1 for s in demo_samples if s['correct'])}/{len(demo_samples)}",
             "message": f"识别演示: {sum(1 for s in demo_samples if s['correct'])}/{len(demo_samples)} 正确",
         }
+
+        # ── 保存用户训练模型（必须在 done 事件之前，因为 SSE 收到 done 后会退出循环）──
+        session_id = config.get("session_id")
+        if session_id and best_epoch > 0 and best_model_state:
+            try:
+                from app.core.mnist.model_manager import ModelManager
+                ModelManager.get_instance().save_user_model(
+                    int(session_id), best_model_state, arch_config
+                )
+            except Exception as e:
+                import logging
+                _mnist_save_log = logging.getLogger("mnist")
+                _mnist_save_log.error(f"保存用户模型失败 session={session_id}: {e}", exc_info=True)
 
         result = {
             "status": "COMPLETED",

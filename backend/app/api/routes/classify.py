@@ -1,7 +1,7 @@
 """图像分类实验 API — 设计文档 §16.2"""
 import json
 import uuid
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session as DbSession
 from app.models.database import get_db, ClassifyRun, Session as SessionModel
 from app.models.schemas import ClassifyRunRequest

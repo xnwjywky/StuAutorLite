@@ -10,7 +10,9 @@ const COLORS = {
   bg: "#ffffff",
   classFill: ["rgba(59,130,246,0.15)", "rgba(239,68,68,0.15)", "rgba(34,197,94,0.15)"],
   classStroke: ["#2563eb", "#dc2626", "#16a34a"],
-  misclass: "#f59e0b", highlight: "#8b5cf6",
+  misclass: "#22c55e",         // 绿色 — 更容易与红/蓝类别区分
+  trainInWrongRegion: "#ffffff", // 训练点落在"错误"区域时加白边，说明这不是误分类
+  highlight: "#8b5cf6",
 };
 
 interface Props {
@@ -25,12 +27,19 @@ interface Props {
   showBoundary?: boolean;
   animate?: boolean;
   nTrain?: number;
+  /** 隐藏训练点，只显示测试点 — 用于结果展示 */
+  hideTrainPoints?: boolean;
+  /** 隐藏误分类绿色标记，测试点统一用真实类别颜色 */
+  hideMisclass?: boolean;
+  /** 移除训练点白边标记（配合 hideTrainPoints=false 使用，让所有点外观一致）*/
+  hideWrongRegion?: boolean;
 }
 
 export default function DecisionBoundary({
   points = [], labels = [], predictions = [], boundaryData,
   classNames = ["类别 A", "类别 B"], showBoundary = true,
-  animate = false, nTrain = 0,
+  animate = false, nTrain = 0, hideTrainPoints = false,
+  hideMisclass = false, hideWrongRegion = false,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
@@ -72,22 +81,38 @@ export default function DecisionBoundary({
         const i = Math.floor(idx / gs[1]), j = idx % gs[1];
         const cls = gp[idx] ?? 0;
         const cx = tx(bx[0] + (bx[1] - bx[0]) * i / (gs[0] - 1)) - cw / 2;
-        const cy = ty(by[1] - (by[1] - by[0]) * j / (gs[1] - 1)) - ch / 2;
+        // Python 生成 grid 时 py = y_min + (y_max - y_min) * j / (gs-1)，用 by[0]（y_min）而非 by[1]
+        const cy = ty(by[0] + (by[1] - by[0]) * j / (gs[1] - 1)) - ch / 2;
         ctx.fillStyle = COLORS.classFill[cls % 3];
         ctx.fillRect(cx, cy, cw + 1, ch + 1);
       }
     }
 
-    // 2. Training points
-    const showTrainUntil = animate ? (frame < 40 ? Math.floor(frame / 40 * trainN) : trainN) : points.length;
-    for (let i = 0; i < Math.min(trainN, showTrainUntil); i++) {
-      const [px, py] = points[i]; const cx = tx(px); const cy = ty(py);
-      ctx.beginPath(); ctx.arc(cx, cy, POINT_R, 0, Math.PI * 2);
-      ctx.fillStyle = COLORS.classStroke[labels[i] % 3];
-      if (animate && i === Math.floor(showTrainUntil) - 1 && frame < 40) {
-        ctx.strokeStyle = COLORS.highlight; ctx.lineWidth = 3; ctx.stroke();
+    // 2. Training points — 仅非隐藏模式时绘制
+    if (!hideTrainPoints) {
+      const showTrainUntil = animate ? (frame < 40 ? Math.floor(frame / 40 * trainN) : trainN) : points.length;
+      for (let i = 0; i < Math.min(trainN, showTrainUntil); i++) {
+        const [px, py] = points[i]; const cx = tx(px); const cy = ty(py);
+        const trueCls = labels[i] ?? 0;
+        let boundaryCls = trueCls;
+        if (showBoundary && gp.length > 0) {
+          const gridCol = Math.round((px - bx[0]) / (bx[1] - bx[0] + 1e-9) * (gs[0] - 1));
+          const gridRow = Math.round((by[1] - py) / (by[1] - by[0] + 1e-9) * (gs[1] - 1));
+          const gridIdx = Math.max(0, Math.min(gp.length - 1, gridRow * gs[1] + gridCol));
+          boundaryCls = gp[gridIdx] ?? trueCls;
+        }
+        const inWrongRegion = !hideWrongRegion && boundaryCls !== trueCls;
+        ctx.beginPath(); ctx.arc(cx, cy, POINT_R, 0, Math.PI * 2);
+        ctx.fillStyle = COLORS.classStroke[trueCls % 3];
+        ctx.fill();
+        if (inWrongRegion) {
+          ctx.strokeStyle = COLORS.trainInWrongRegion; ctx.lineWidth = 2.5;
+          ctx.stroke();
+        }
+        if (animate && i === Math.floor(showTrainUntil) - 1 && frame < 40) {
+          ctx.strokeStyle = COLORS.highlight; ctx.lineWidth = 3; ctx.stroke();
+        }
       }
-      ctx.fill();
     }
 
     // 3. Test / prediction points
@@ -97,7 +122,7 @@ export default function DecisionBoundary({
       const [px, py] = points[i]; const cx = tx(px); const cy = ty(py);
       const trueCls = labels[i] ?? 0;
       const predCls = predictions[i - testStart] ?? trueCls;
-      const misclassified = predCls !== trueCls;
+      const misclassified = !hideMisclass && predCls !== trueCls;
       ctx.beginPath(); ctx.arc(cx, cy, POINT_R, 0, Math.PI * 2);
       if (misclassified) {
         ctx.fillStyle = COLORS.misclass;
@@ -110,14 +135,24 @@ export default function DecisionBoundary({
     }
 
     // 4. Legend & stats
-    const legendY = CANVAS_SIZE - 18; ctx.font = "11px sans-serif"; let lx = 30;
-    for (let c = 0; c < nClasses; c++) { ctx.fillStyle = COLORS.classStroke[c % 3]; ctx.fillRect(lx, legendY - 6, 10, 10); ctx.fillStyle = "#374151"; ctx.textAlign = "left"; ctx.fillText(classNames[c] ?? `类别 ${c}`, lx + 14, legendY + 3); lx += 90; }
-    ctx.beginPath(); ctx.arc(lx + 5, legendY - 1, POINT_R, 0, Math.PI * 2); ctx.fillStyle = COLORS.misclass; ctx.fill(); ctx.fillStyle = "#374151"; ctx.fillText("误分类", lx + 14, legendY + 3);
+    const legendY1 = CANVAS_SIZE - 32; const legendY2 = CANVAS_SIZE - 16;
+    ctx.font = "11px sans-serif"; let lx = 30;
+    for (let c = 0; c < nClasses; c++) { ctx.fillStyle = COLORS.classStroke[c % 3]; ctx.fillRect(lx, legendY1 - 6, 10, 10); ctx.fillStyle = "#374151"; ctx.textAlign = "left"; ctx.fillText(classNames[c] ?? `类别 ${c}`, lx + 14, legendY1 + 3); lx += 95; }
+    // 第二行
+    lx = 30;
+    if (!hideWrongRegion && !hideTrainPoints && !hideMisclass) {
+      ctx.beginPath(); ctx.arc(lx + 5, legendY2 - 1, POINT_R, 0, Math.PI * 2); ctx.fillStyle = COLORS.classStroke[0]; ctx.fill(); ctx.strokeStyle = COLORS.trainInWrongRegion; ctx.lineWidth = 2; ctx.stroke(); ctx.fillStyle = "#374151"; ctx.fillText("训练数据(白边)", lx + 14, legendY2 + 3); lx += 140;
+    }
+    if (!hideMisclass) {
+      ctx.beginPath(); ctx.arc(lx + 5, legendY2 - 1, POINT_R, 0, Math.PI * 2); ctx.fillStyle = COLORS.misclass; ctx.fill(); ctx.fillStyle = "#374151"; ctx.fillText("测试误分类", lx + 14, legendY2 + 3);
+    }
 
     if (predictions.length > 0) {
-      const correct = predictions.filter((p, i) => p === labels[i]).length;
+      const testStartIdx = nTrain || Math.floor(points.length * 0.7);
+      const testLabels = labels.slice(testStartIdx, testStartIdx + predictions.length);
+      const correct = predictions.filter((p, i) => p === testLabels[i]).length;
       ctx.font = "12px sans-serif"; ctx.fillStyle = "#374151"; ctx.textAlign = "right";
-      ctx.fillText(`准确率: ${(correct / labels.length * 100).toFixed(1)}% (${correct}/${labels.length})`, CANVAS_SIZE - 30, 46);
+      ctx.fillText(`正确/总数: ${correct}/${predictions.length}`, CANVAS_SIZE - 30, 46);
     }
     ctx.font = "10px sans-serif"; ctx.fillStyle = "#9ca3af"; ctx.textAlign = "center";
     ctx.fillText("特征 x", CANVAS_SIZE / 2, CANVAS_SIZE - 2);
@@ -205,11 +240,16 @@ export default function DecisionBoundary({
           <button onClick={handleReplay} className="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-full text-xs font-medium transition-colors">🔄 重播</button>
         )}
       </div>
-      <div className="flex gap-4 text-[10px] text-gray-400">
+      <div className="flex gap-4 text-[10px] text-gray-400 flex-wrap">
         {classNames.map((name, i) => (
           <span key={name}><span className="inline-block w-3 h-3 rounded-sm mr-1 align-middle" style={{ background: COLORS.classStroke[i % 3] }} />{name}</span>
         ))}
-        <span><span className="inline-block w-3 h-3 rounded-full mr-1 align-middle" style={{ background: COLORS.misclass }} />误分类</span>
+        {!hideWrongRegion && !hideMisclass && !hideTrainPoints && (
+          <span><span className="inline-block w-3 h-3 rounded-full mr-1 align-middle" style={{ background: COLORS.classStroke[0], border: `2px solid ${COLORS.trainInWrongRegion}` }} />训练点(白边)</span>
+        )}
+        {!hideMisclass && (
+          <span><span className="inline-block w-3 h-3 rounded-full mr-1 align-middle" style={{ background: COLORS.misclass }} />测试误分类</span>
+        )}
         <span style={{ opacity: 0.6 }}><span className="inline-block w-3 h-3 rounded-sm mr-1 align-middle" style={{ background: COLORS.classFill[0] }} />决策区域</span>
       </div>
     </div>

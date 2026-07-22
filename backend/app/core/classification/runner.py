@@ -69,8 +69,10 @@ class ClassificationExperimentRunner:
                             "recall": result["recall"],
                             "f1": result["f1"],
                             "runtime_ms": result["runtime_ms"],
-                            "points": data["points"],
-                            "labels": data["labels"],
+                            # 使用重排后的数据（训练点在前，测试点在后）
+                            "points": result.get("points", data["points"]),
+                            "labels": result.get("labels", data["labels"]),
+                            "n_train": result.get("n_train", int(n_samples * train_ratio)),
                             "predictions": result["predictions"],
                             "boundary_data": result["boundary_data"],
                         }

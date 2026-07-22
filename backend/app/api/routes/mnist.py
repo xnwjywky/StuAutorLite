@@ -1,7 +1,7 @@
 """MNIST 手写数字识别实验 API"""
 import json, uuid, asyncio, logging
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session as DbSession
 from pydantic import BaseModel, Field
@@ -114,6 +114,7 @@ def run_mnist(req: MNISTRunRequest, db: DbSession = Depends(get_db)):
         "architecture": req.architecture,
         "hyperparameters": req.hyperparameters,
         "seed": req.seed,
+        "session_id": req.session_id,
     }
     batch_id = str(uuid.uuid4())[:8]
     try:
@@ -160,6 +161,7 @@ async def run_mnist_stream(req: MNISTRunRequest):
         "architecture": req.architecture,
         "hyperparameters": req.hyperparameters,
         "seed": req.seed,
+        "session_id": req.session_id,
     }
 
     async def event_stream():
@@ -193,6 +195,98 @@ def list_runs(session_id: int | None = None, db: DbSession = Depends(get_db)):
     if session_id:
         q = q.filter(MNISTRun.session_id == session_id)
     return [_run_to_dict(r) for r in q.order_by(MNISTRun.id.desc()).all()]
+
+
+# ═══════ 上传图片识别 ═══════
+
+@router.get("/model-status")
+async def get_model_status(session_id: int | None = None):
+    """返回所有可选识别模型的状态列表（供前端下拉框）。
+    每个模型：id, name, params, description, status(cached|training|failed|not_available), selectable, progress, accuracy, type。
+    """
+    from app.core.mnist.model_manager import ModelManager
+    return {"models": ModelManager.get_all_model_info(session_id)}
+
+
+@router.get("/start-pretrain")
+async def start_pretrain_background():
+    """启动后台预设模型串行预训练（非阻塞），缺失模型立即开始。
+    通过 /model-status 轮询进度。"""
+    from app.core.mnist.model_manager import ModelManager
+
+    try:
+        device_obj, _ = _detect_device()
+        device_str = str(device_obj)
+    except Exception:
+        device_str = "cpu"
+
+    ModelManager.start_pretrain_background(device=device_str)
+    return {"started": True, "device": device_str}
+
+
+@router.post("/infer")
+async def infer_upload_image(
+    file: UploadFile = File(...),
+    session_id: int = Form(...),
+    model_id: str = Form("standardcnn"),
+):
+    """上传手写数字图片，用指定模型识别。
+
+    model_id: "minicnn" | "standardcnn" | "deepcnn" | "user"
+    返回: {model_id, predicted, confidence, probabilities, model_name}
+    """
+    from app.core.mnist.model_manager import (
+        ModelManager,
+        preprocess_upload_image,
+        run_inference,
+    )
+
+    mgr = ModelManager.get_instance()
+
+    try:
+        import torch
+        device_obj, device_diag = _detect_device()
+        device_str = str(device_obj)
+    except Exception:
+        device_str = "cpu"
+        device_diag = {"warnings": []}
+
+    # 1. 预处理图片
+    image_bytes = await file.read()
+    image_tensor = preprocess_upload_image(image_bytes, device=device_str)
+    if image_tensor is None:
+        raise HTTPException(status_code=400, detail="图片预处理失败，请确认上传的是手写数字图片")
+
+    # 2. 加载指定模型
+    model = mgr.load_model_by_id(model_id, session_id, device=device_str)
+    if model is None:
+        status = ModelManager._training_status.get(model_id, "not_available")
+        if status == "training":
+            raise HTTPException(status_code=409, detail=f"模型 {model_id} 正在训练中，请等待完成后再试")
+        elif model_id == "user":
+            raise HTTPException(status_code=404, detail="尚未训练用户模型，请先在训练监控区运行训练")
+        else:
+            raise HTTPException(status_code=404, detail=f"模型 {model_id} 未就绪（状态: {status}）")
+
+    # 3. 推理
+    result = run_inference(model, image_tensor)
+
+    meta = {"minicnn": "MiniCNN", "standardcnn": "StandardCNN",
+            "deepcnn": "DeepCNN", "user": "我的训练模型"}
+    result["model_id"] = model_id
+    result["model_name"] = meta.get(model_id, model_id)
+    result["device"] = device_str
+
+    return result
+
+
+@router.get("/has-user-model")
+def check_user_model(session_id: int):
+    """检查是否有用户训练的模型可供识别。"""
+    from app.core.mnist.model_manager import ModelManager
+    return {
+        "exists": ModelManager.get_instance().has_user_model(int(session_id)),
+    }
 
 
 def _run_to_dict(r) -> dict:

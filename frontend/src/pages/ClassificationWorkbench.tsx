@@ -304,9 +304,10 @@ function Stage5() {
   const store = useClassificationStore();
   const [running, setRunning] = useState(false);
   const [selectedTrial, setSelectedTrial] = useState(1);
+  const [runError, setRunError] = useState<string | null>(null);
 
   const execRun = async () => {
-    setRunning(true);
+    setRunning(true); setRunError(null);
     const clfs = store.selectedClassifiers.length > 0 ? store.selectedClassifiers : ["KNN", "DECISION_TREE", "RANDOM"];
     try {
       const settings: Record<string, unknown> = {
@@ -317,10 +318,9 @@ function Stage5() {
       };
       const data = await runClassificationExperiment({ session_id: store.sessionId!, classifiers: clfs, settings });
       store.set({ experimentResult: data as any, selectedRunIdx: 0 });
-    } catch {
-      // Fallback: generate mock data locally
-      const mock = generateMockClassifyRun(store);
-      store.set({ experimentResult: mock, selectedRunIdx: 0 });
+      setRunError(null);
+    } catch (e: any) {
+      setRunError(`后端请求失败: ${e?.message || String(e)}\n请确认后端已启动 (cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000)`);
     } finally { setRunning(false); }
   };
 
@@ -350,12 +350,38 @@ function Stage5() {
         )}
       </div>
 
+      {/* 后端错误提示 */}
+      {runError && !result && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <p className="text-sm font-medium text-red-700 mb-1">运行失败</p>
+          <pre className="text-xs text-red-600 whitespace-pre-wrap">{runError}</pre>
+        </div>
+      )}
+
       {/* 各分类器决策边界（每个独立动画，与迷宫一致） */}
       {result && displayRuns.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {displayRuns.map((r: any) => (
+        <>
+          {/* 决策边界说明 */}
+          <div className="card border-blue-100 bg-blue-50/30">
+            <h3 className="font-semibold text-sm text-gray-700 mb-1">📖 如何看懂下面的网格图？</h3>
+            <p className="text-xs text-gray-500 leading-relaxed">
+              彩色<strong>背景区域</strong> = 决策边界（分类器"认为"该区域属于哪个类别）。
+              每个<strong>圆点</strong> = 一个数据样本（{store.nSamples}个），颜色 = <strong>真实类别</strong>。
+              圆点颜色与背景一致 = 分类正确。右上角数字 = <strong>正确/总数</strong>。
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {displayRuns.map((r: any) => {
+            // 使用后端返回的 n_train（与重排后的数据一致），前端 trainRatio 作为 fallback
+            const nTrain = r.n_train ?? Math.floor((r.points?.length || 0) * store.trainRatio);
+            const nTest = (r.points?.length || 0) - nTrain;
+            const testLabels = (r.labels || []).slice(nTrain);
+            const testPreds: number[] = r.predictions || [];
+            const correct = testPreds.filter((p, i) => p === testLabels[i]).length;
+            const computedAcc = nTest > 0 ? (correct / nTest * 100).toFixed(1) : "—";
+            return (
             <div key={`${r.classifier}-${r.trial}`} className="card flex flex-col items-center">
-              <h3 className="text-xs font-semibold mb-1.5">{r.classifier} #{r.trial} · 准确率 {(r.accuracy * 100).toFixed(1)}%</h3>
+              <h3 className="text-xs font-semibold mb-1.5">{r.classifier} #{r.trial} · 准确率 {computedAcc}%</h3>
               <DecisionBoundary
                 key={`${r.classifier}-${r.trial}`}
                 points={r.points}
@@ -363,23 +389,20 @@ function Stage5() {
                 predictions={r.predictions}
                 boundaryData={r.boundary_data}
                 animate={true}
-                nTrain={Math.floor((r.points?.length || 0) * store.trainRatio)}
+                nTrain={nTrain}
+                hideTrainPoints={false}
+                hideMisclass={true}
+                hideWrongRegion={true}
               />
               <div className="text-[10px] text-gray-400 mt-1 text-center">
                 精确率 {r.precision?.join("/")} · 召回率 {r.recall?.join("/")} · F1 {r.f1?.join("/")} · {r.runtime_ms}ms
               </div>
             </div>
-          ))}
+          );})}
         </div>
+        </>
       )}
 
-      {/* 图表 — 只保留选中的指标 */}
-      {result && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {store.selectedMetrics.includes("accuracy") && <ChartPanel data={Object.entries(result.summary).map(([a, s]: any) => ({ classifier: a, v: +(s.avg_accuracy * 100).toFixed(1) }))} singleMetric={{ key: "v", label: "准确率 (%)" }} xKey="classifier" />}
-          {store.selectedMetrics.includes("f1") && <ChartPanel data={Object.entries(result.summary).map(([a, s]: any) => ({ classifier: a, v: +(s.avg_f1 * 100).toFixed(1) }))} singleMetric={{ key: "v", label: "F1 分数 (%)" }} xKey="classifier" />}
-        </div>
-      )}
     </StageContainer>
   );
 }
@@ -580,60 +603,3 @@ function buildFallbackReview(store: ReturnType<typeof useClassificationStore.get
   return { scores: s, strengths: ["完成了分类实验报告的基本结构"], weaknesses: ["可以增加更多重复实验次数"], revision_suggestions: ["用具体数据支撑你的结论", "补充实验的局限性和改进方向"], review_questions: ["你的结论是基于数据还是直觉？", "如果数据分布变了，结论还会一样吗？"] };
 }
 
-// ═══════ 本地模拟数据（API 不可用时的降级方案）═══════
-function generateMockClassifyRun(store: ReturnType<typeof useClassificationStore.getState>) {
-  const clfs = store.selectedClassifiers.length > 0 ? store.selectedClassifiers : ["KNN", "DECISION_TREE", "RANDOM"];
-  const runs: any[] = [];
-  const summary: Record<string, any> = {};
-  const accuracies: Record<string, number> = { KNN: 0.92, DECISION_TREE: 0.88, RANDOM: 0.50 };
-
-  for (let t = 1; t <= store.numTrials; t++) {
-    // Generate simple blobs data
-    const points: [number, number][] = [];
-    const labels: number[] = [];
-    for (let i = 0; i < store.nSamples; i++) {
-      const c = i < store.nSamples / 2 ? 0 : 1;
-      const cx = c === 0 ? 2 + (Math.random() - 0.5) * 2 : 6 + (Math.random() - 0.5) * 2;
-      const cy = c === 0 ? 2 + (Math.random() - 0.5) * 2 : 6 + (Math.random() - 0.5) * 2;
-      points.push([+cx.toFixed(3), +cy.toFixed(3)]);
-      labels.push(c);
-    }
-
-    for (const cname of clfs) {
-      const acc = accuracies[cname] + (Math.random() - 0.5) * 0.06;
-      const nTest = Math.floor(store.nSamples * (1 - store.trainRatio));
-      const predictions = labels.slice(-nTest).map((l) => Math.random() < acc ? l : (1 - l));
-      runs.push({
-        classifier: cname, n_samples: store.nSamples, noise_level: store.noiseLevels[0],
-        pattern: store.patterns[0], trial: t, seed: 42 + t,
-        accuracy: +(acc).toFixed(3), precision: [+(acc - 0.02).toFixed(3), +(acc + 0.02).toFixed(3)],
-        recall: [+(acc - 0.03).toFixed(3), +(acc).toFixed(3)],
-        f1: [+(acc - 0.01).toFixed(3), +(acc + 0.01).toFixed(3)],
-        runtime_ms: +(cname === "KNN" ? 3 + Math.random() * 3 : cname === "DECISION_TREE" ? 1 + Math.random() : 0.5).toFixed(1),
-        points, labels, predictions,
-        boundary_data: null,
-      });
-    }
-  }
-
-  for (const cname of clfs) {
-    const recs = runs.filter((r: any) => r.classifier === cname);
-    const n = recs.length;
-    summary[cname] = {
-      avg_accuracy: +(recs.reduce((s: number, r: any) => s + r.accuracy, 0) / n).toFixed(3),
-      avg_precision: +(recs.reduce((s: number, r: any) => s + r.precision[0], 0) / n).toFixed(3),
-      avg_recall: +(recs.reduce((s: number, r: any) => s + r.recall[0], 0) / n).toFixed(3),
-      avg_f1: +(recs.reduce((s: number, r: any) => s + r.f1[0], 0) / n).toFixed(3),
-      avg_runtime_ms: +(recs.reduce((s: number, r: any) => s + r.runtime_ms, 0) / n).toFixed(1),
-      count: n,
-    };
-  }
-
-  return {
-    experiment_batch_id: "demo-" + Date.now().toString(36),
-    status: "COMPLETED",
-    total_runs: runs.length,
-    summary,
-    runs,
-  };
-}

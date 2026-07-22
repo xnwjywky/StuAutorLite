@@ -51,6 +51,19 @@ export interface MNISTWorkflowData {
   reflectionAnswers: Record<number, string>;
   aiAnalysis: { summary: string; key_findings: string[]; questions_for_student: string[] } | null;
   reportMarkdown: string;
+
+  // 上传图片识别结果（传递给后续分析/报告阶段）
+  uploadInference: {
+    fileName: string;
+    modelId: string;
+    modelName: string;
+    predicted: number;
+    confidence: number;
+    probabilities: number[];
+  } | null;
+
+  /** 训练完成时间戳 — 每次训练完成后递增，供 UploadInfer 监听并刷新模型列表 */
+  trainingCompletedAt: number;
 }
 
 const DEFAULT_HP = { learningRate: 0.01, batchSize: 64, epochs: 10, optimizer: "SGD", momentum: 0.9, dropout: 0.25 };
@@ -65,6 +78,7 @@ const defaults = (): MNISTWorkflowData => ({
   experimentResult: null, resultFingerprint: "",
   studentAnalysis: "", reflectionAnswers: {},
   aiAnalysis: null, reportMarkdown: "",
+  uploadInference: null, trainingCompletedAt: 0,
 });
 
 export const useMNISTStore = create<MNISTWorkflowData & {

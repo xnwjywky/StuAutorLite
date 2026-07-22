@@ -58,24 +58,37 @@ async function callAgent(agentName: string, stage: string, fn: () => Promise<{ r
 export default function SortingWorkbench() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const store = useAlgoCompareStore();
+  const [sidebarOpen, setSidebarOpen] = useState(true);  // 侧栏折叠开关
   useEffect(() => { const id = Number(sessionId); store.init(Number.isNaN(id) ? -1 : id); }, [sessionId]);
   if (store.sessionId === null) return null;
   const isSort = store.experimentType === "sorting";
   return (
     <Layout>
-      <div className="flex" style={{ minHeight: "calc(100vh - 56px)" }}>
-        <aside className="w-64 bg-white border-r border-gray-200 p-4 flex-shrink-0">
-          <h1 className="text-lg font-bold text-gray-800 mb-2">研究工作台</h1>
-          <p className="text-xs text-gray-400 mb-4">{isSort ? "排序算法比较研究" : "字符串搜索算法研究"}</p>
-          <FlowStepper steps={STEPS} current={store.currentStage} onStepClick={(s) => {
-            if (s === "TASK_SELECTED") { store.setStage("TASK_SELECTED"); return; }
-            const keys = STEPS.map(st => st.key);
-            if (!store.refinedQuestion) { store.setStage("TASK_SELECTED"); return; }
-            if (keys.indexOf(s) > keys.indexOf("EXPERIMENT_DESIGNED") && !store.designCompleted) store.setStage("EXPERIMENT_DESIGNED");
-            else store.setStage(s);
-          }} />
-        </aside>
-        <div className="flex-1 overflow-auto bg-gray-50"><StageRouter /></div>
+      <div className="flex relative" style={{ minHeight: "calc(100vh - 56px)" }}>
+        {sidebarOpen && (
+          <aside className="w-56 bg-white border-r border-gray-200 p-4 flex-shrink-0">
+            <h1 className="text-lg font-bold text-gray-800 mb-2">研究工作台</h1>
+            <p className="text-xs text-gray-400 mb-4">{isSort ? "排序算法比较研究" : "字符串搜索算法研究"}</p>
+            <FlowStepper steps={STEPS} current={store.currentStage} onStepClick={(s) => {
+              if (s === "TASK_SELECTED") { store.setStage("TASK_SELECTED"); return; }
+              const keys = STEPS.map(st => st.key);
+              if (!store.refinedQuestion) { store.setStage("TASK_SELECTED"); return; }
+              if (keys.indexOf(s) > keys.indexOf("EXPERIMENT_DESIGNED") && !store.designCompleted) store.setStage("EXPERIMENT_DESIGNED");
+              else store.setStage(s);
+            }} />
+          </aside>
+        )}
+        <div className="flex-1 overflow-auto bg-gray-50">
+          {/* 侧栏折叠按钮 — 放在内容区左上角 */}
+          <button
+            onClick={() => setSidebarOpen(v => !v)}
+            className="sticky top-2 left-2 z-10 w-6 h-6 bg-white border border-gray-200 rounded-full flex items-center justify-center hover:bg-gray-100 hover:border-gray-300 transition-colors shadow-sm"
+            title={sidebarOpen ? "折叠侧栏 → 显示区拉宽" : "展开侧栏"}
+          >
+            <span className="text-[10px] text-gray-400">{sidebarOpen ? "◀" : "▶"}</span>
+          </button>
+          <StageRouter />
+        </div>
       </div>
     </Layout>
   );
@@ -245,14 +258,17 @@ function Stage5() {
   const displayRuns = result?.runs ? result.runs.filter((r: any) => r.trial === store.selectedTrial) : [];
   const algoList = isSort ? SORT_ALGOS : SEARCH_ALGOS;
   const nameOf = (a: string) => algoList.find(x => x.key === a)?.name || a;
-  const layoutClass = !isSort || store.arraySize > 20 ? "space-y-6" : "grid grid-cols-1 sm:grid-cols-2 gap-4";
+  const layoutClass = isSort ? "grid grid-cols-1 md:grid-cols-2 gap-4" : "space-y-6";
   const configText = isSort
     ? `算法：${(selected.length>0?selected:defAlgos).map(nameOf).join("、")} | ${store.arraySize} 元素 | ${store.dataPattern==="random"?"随机":store.dataPattern==="reversed"?"逆序":"基本有序"} | ×${store.numTrials} 次`
     : `算法：${(selected.length>0?selected:defAlgos).map(nameOf).join("、")} | 文本 ${store.textLength} 字符 | 模式串 ${store.patternLength} 字符 | ×${store.numTrials} 次`;
 
   return (<StageContainer step={3} title="运行实验" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("EXPERIMENT_DESIGNED")}>← 上一步</button><button className="btn-primary" onClick={() => store.setStage("RESULT_ANALYZED")} disabled={!result}>查看结果 → 分析</button></div>}><div className="card"><div className="flex items-center justify-between flex-wrap gap-3"><div><h2 className="font-semibold">实验配置</h2><p className="text-sm text-gray-400">{configText}</p></div><button className="btn-primary text-lg px-6" onClick={execRun} disabled={running}>{running ? "⏳ 运行中..." : result ? "🔄 重新运行" : "▶ 开始实验"}</button></div>{result && store.numTrials > 1 && (<div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100"><span className="text-xs text-gray-500 font-medium">切换回合：</span>{Array.from({length:store.numTrials},(_,i)=>i+1).map(t=><button key={t} onClick={()=>store.set({selectedTrial:t})} className={`px-3 py-1 rounded-full text-xs font-medium ${store.selectedTrial===t?"bg-gray-900 text-white":"bg-gray-100 text-gray-500"}`}>第{t}回</button>)}</div>)}</div>
-    {displayRuns.length > 0 && (<div className="card"><h3 className="font-semibold text-gray-700 mb-3 text-sm">第 {store.selectedTrial} 回合 {isSort ? "排序" : "搜索"}过程</h3><div className={layoutClass}>{displayRuns.map((r: any) => (<div key={r.algorithm} className="flex flex-col items-center"><div className="flex items-center gap-2 mb-2"><span className="font-semibold text-sm">{nameOf(r.algorithm)}</span><span className="text-xs text-gray-400">{isSort ? `交换 ${r.swaps} · 比较 ${r.comparisons} · ${r.runtime_ms}ms` : `${r.comparisons} 次比较 · ${r.matches} 匹配 · ${r.runtime_ms}ms`}</span></div>{isSort ? <SortVisualizer key={`${r.algorithm}-${store.selectedTrial}`} steps={r.steps} /> : <StringSearchVisualizer key={`${r.algorithm}-${store.selectedTrial}`} steps={r.steps} />}</div>))}</div></div>)}
-    {result && (isSort ? (<div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><ChartPanel data={Object.entries(result.summary).map(([a,s]:any)=>({algorithm:a,v:s.avg_swaps}))} singleMetric={{key:"v",label:"平均交换次数"}} xKey="algorithm" /><ChartPanel data={Object.entries(result.summary).map(([a,s]:any)=>({algorithm:a,v:s.avg_comparisons}))} singleMetric={{key:"v",label:"平均比较次数"}} xKey="algorithm" /></div>) : (<ChartPanel data={Object.entries(result.summary).map(([a,s]:any)=>({algorithm:a,v:s.avg_comparisons}))} singleMetric={{key:"v",label:"平均比较次数"}} xKey="algorithm" />))}
+    {displayRuns.length > 0 && (<div className="card overflow-x-auto"><h3 className="font-semibold text-gray-700 mb-3 text-sm">第 {store.selectedTrial} 回合 {isSort ? "排序" : "搜索"}过程</h3><div className={layoutClass}>{displayRuns.map((r: any) => (<div key={r.algorithm} className="flex flex-col items-center min-w-0"><div className="flex items-center gap-2 mb-2"><span className="font-semibold text-sm">{nameOf(r.algorithm)}</span><span className="text-xs text-gray-400">{isSort ? `交换 ${r.swaps} · 比较 ${r.comparisons} · ${r.runtime_ms}ms` : `${r.comparisons} 次比较 · ${r.matches} 匹配 · ${r.runtime_ms}ms`}</span></div>{isSort ? <SortVisualizer key={`${r.algorithm}-${store.selectedTrial}`} steps={r.steps} /> : <StringSearchVisualizer key={`${r.algorithm}-${store.selectedTrial}`} steps={r.steps} />}</div>))}</div></div>)}
+    {result && (isSort ? (<div className="card"><div className="grid grid-cols-1 lg:grid-cols-2 gap-4">{[
+      { data: Object.entries(result.summary).map(([a,s]:any)=>({algorithm:a,v:s.avg_swaps})), key: "v", label: "平均交换次数" },
+      { data: Object.entries(result.summary).map(([a,s]:any)=>({algorithm:a,v:s.avg_comparisons})), key: "v", label: "平均比较次数" },
+    ].map(chart => (<ChartPanel key={chart.label} data={chart.data} singleMetric={{key:chart.key,label:chart.label}} xKey="algorithm" />))}</div></div>) : (<ChartPanel data={Object.entries(result.summary).map(([a,s]:any)=>({algorithm:a,v:s.avg_comparisons}))} singleMetric={{key:"v",label:"平均比较次数"}} xKey="algorithm" />))}
   </StageContainer>);
 }
 

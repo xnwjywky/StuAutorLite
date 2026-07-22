@@ -38,8 +38,18 @@ app.include_router(mnist.router, prefix="/api")
 
 @app.on_event("startup")
 def on_startup():
-    """应用启动时初始化数据库"""
+    """应用启动时初始化数据库 + 触发预训练模型后台训练"""
     init_db()
+
+    # 在后台线程中串行训练缺失的预训练模型（非阻塞，不延迟应用启动）
+    try:
+        from app.core.mnist.model_manager import ModelManager
+        from app.core.mnist.runner import _detect_device
+        device_obj, _ = _detect_device()
+        ModelManager.start_pretrain_background(device=str(device_obj))
+    except Exception:
+        # 依赖缺失等极端情况静默失败，用户访问 MNIST 页面时会看到报错
+        pass
 
 
 @app.get("/")

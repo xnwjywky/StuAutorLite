@@ -59,8 +59,8 @@ export default function SortVisualizer({ steps = [] }: Props) {
   const progress = steps.length > 0 ? Math.round(frame / steps.length * 100) : 0;
 
   return (
-    <div className="flex flex-col items-center gap-2">
-      <canvas ref={canvasRef} className="border border-gray-200 rounded-lg shadow-sm" style={{ width: w, height: BASE_H + 60 }} />
+    <div className="flex flex-col items-center gap-2 w-full min-w-0">
+      <canvas ref={canvasRef} className="border border-gray-200 rounded-lg shadow-sm max-w-full" style={{ width: w, height: BASE_H + 60 }} />
       {steps.length > 0 && <div className="w-full bg-gray-100 rounded-full h-1.5"><div className="bg-blue-500 h-1.5 rounded-full transition-all" style={{ width: `${progress}%` }} /></div>}
       <div className="flex items-center gap-3 text-xs text-gray-500">
         {!done ? <span>步骤 {frame}/{steps.length}</span> : <span>✅ 完成</span>}
