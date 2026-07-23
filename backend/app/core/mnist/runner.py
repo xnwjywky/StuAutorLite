@@ -377,45 +377,59 @@ class MNISTRunner:
             elif device.type == "npu":
                 # ── NPU (华为 Ascend): torch.npu 内存统计 ──
                 try:
-                    # 确保 torch_npu 已导入（直接调用时可能尚未导入）
-                    try:
-                        import torch_npu
-                    except ImportError:
-                        pass
-                    allocated = torch.npu.memory_allocated(device)
-                    total = torch.npu.get_device_properties(device).total_memory
+                    import torch_npu
+                except ImportError:
+                    pass
+                try:
+                    # 单卡: device.index 可能是 None → 取 int(device.index or 0)
+                    idx = int(device.index if device.index is not None else 0)
+                    allocated = torch.npu.memory_allocated(idx)
+                    total = torch.npu.get_device_properties(idx).total_memory
                     result["memory_util"] = round(allocated / total * 100, 1)
                     result["memory_allocated_mb"] = round(allocated / 1024 / 1024, 1)
                     result["memory_total_mb"] = round(total / 1024 / 1024, 1)
-                except Exception:
-                    pass
+                except Exception as e:
+                    _train_log.info(f"NPU 内存统计失败: {e}")
 
-                # 尝试通过 npu-smi 获取 NPU 计算利用率
-                if not hasattr(MNISTRunner, "_npu_smi_ok"):
+                # 尝试通过 npu-smi 采集各卡使用率 (多卡时采前 4 卡)
+                try:
+                    import subprocess, re
+                    target_card = int(device.index if device.index is not None else 0)
+                    # 尝试多种 npu-smi 命令格式
+                    for cmd in (
+                        ["npu-smi", "info", "-t", "usg", "-i", str(target_card)],
+                        ["npu-smi", "info", "-m"],
+                    ):
+                        try:
+                            r = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+                            if r.returncode == 0 and r.stdout.strip():
+                                break
+                        except Exception:
+                            continue
+                    if r.returncode == 0:
+                        # 尝试从输出中提取使用率数字
+                        nums = re.findall(r"(\d+)\s*%?", r.stdout)
+                        if nums:
+                            # 通常第一个数字是 AI Core 利用率
+                            result["compute_util"] = float(nums[0])
+                    # 额外尝试采集多卡概览
                     try:
-                        import subprocess
-                        r = subprocess.run(
-                            ["npu-smi", "info", "-t", "usg", "-i", "0"],
+                        r2 = subprocess.run(
+                            ["npu-smi", "info", "-t", "usg", "-i", "-1"],
                             capture_output=True, text=True, timeout=2,
                         )
-                        MNISTRunner._npu_smi_ok = (r.returncode == 0)
-                    except Exception:
-                        MNISTRunner._npu_smi_ok = False
-
-                if MNISTRunner._npu_smi_ok:
-                    try:
-                        import subprocess
-                        r = subprocess.run(
-                            ["npu-smi", "info", "-t", "usg", "-i", "0"],
-                            capture_output=True, text=True, timeout=1,
-                        )
-                        if r.returncode == 0:
-                            import re
-                            m = re.search(r"(\d+)", r.stdout)
-                            if m:
-                                result["compute_util"] = float(m.group(1))
+                        if r2.returncode == 0:
+                            cards: list[dict] = []
+                            for line in r2.stdout.splitlines():
+                                m = re.match(r"\s*(\d+)\s+(\d+)", line)
+                                if m:
+                                    cards.append({"id": int(m.group(1)), "usage": int(m.group(2))})
+                            if cards:
+                                result["cards"] = cards
                     except Exception:
                         pass
+                except Exception:
+                    pass
 
             elif device.type == "mps":
                 # ── Apple MPS: 内存统计 ──
@@ -548,12 +562,6 @@ class MNISTRunner:
             "message": f"加载 MNIST 数据集... 设备: {device}",
         }
 
-        # 初始设备使用率
-        init_util = MNISTRunner._sample_device_utilization(device)
-        if init_util:
-            yield {"type": "device_util", "epoch": 0, "total_epochs": epochs,
-                   "device": str(device), **init_util}
-            _train_log.info(f"初始设备使用率: {init_util}")
 
         # ── 数据加载 ──
         _train_log.info("加载 MNIST 数据集...")
@@ -593,6 +601,38 @@ class MNISTRunner:
             _train_log.error(f"模型构建/多卡加速失败: {e}", exc_info=True)
             yield {"type": "error", "message": f"模型构建失败: {str(e)}。设备={device}"}
             return
+
+        # ── 发送实际使用的卡信息（SSE + 日志）──
+        if num_devices > 1:
+            dp_ids = list(getattr(model, "device_ids", []))
+            card_ids = dp_ids if dp_ids else [getattr(device, "index", 0)]
+            card_str = ", ".join(f"{device.type}:{i}" for i in card_ids)
+            _train_log.info(f"多卡就绪: {num_devices} 卡 [{card_str}], bs={batch_size}")
+            yield dict(type="device_info", device=str(device), selected=device.type,
+                       num_devices=num_devices, card_ids=card_ids,
+                       card_list=[f"{device.type}:{i}" for i in card_ids],
+                       batch_size=batch_size,
+                       messages=device_diag["messages"] + [f"已启用 {num_devices} 卡并行: {card_str}"],
+                       detected=device_diag["detected"], usable=device_diag["usable"],
+                       warnings=device_diag["warnings"])
+        else:
+            idx = getattr(device, "index", None)
+            card_str = f"{device.type}:{idx}" if idx is not None else str(device)
+            _train_log.info(f"单设备就绪: {card_str}")
+            yield dict(type="device_info", device=str(device), selected=device.type,
+                       num_devices=1, card_ids=[idx] if idx is not None else [],
+                       card_list=[card_str], batch_size=batch_size,
+                       messages=device_diag["messages"],
+                       detected=device_diag["detected"], usable=device_diag["usable"],
+                       warnings=device_diag["warnings"])
+
+        # 各卡使用率日志
+        init_util = MNISTRunner._sample_device_utilization(device)
+        if init_util and init_util.get("cards"):
+            card_status = ", ".join(f"npu:{c['id']} {c['usage']}%" for c in init_util["cards"][:8])
+            _train_log.info(f"NPU 各卡使用率: {card_status}")
+            yield dict(type="device_util", epoch=0, total_epochs=epochs,
+                       device=str(device), **init_util)
 
         # ── 训练整段包裹在 try/except 中，捕获 NPU 运行时错误 ──
         try:

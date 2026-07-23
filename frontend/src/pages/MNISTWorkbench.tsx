@@ -333,9 +333,11 @@ function Stage3() {
   const [device, setDevice] = useState<string>("");            // CPU / CUDA / NPU / MPS
   const [deviceUtil, setDeviceUtil] = useState(0);              // 0-100 使用率（来自真实设备采样）
   const [deviceUtilLabel, setDeviceUtilLabel] = useState("");   // "compute" | "memory" | ""
-  const [deviceWarnings, setDeviceWarnings] = useState<string[]>([]);  // 设备诊断警告
-  const [deviceMessages, setDeviceMessages] = useState<string[]>([]);  // 设备诊断消息
-  const [batchText, setBatchText] = useState("");              // batch 级进度文字
+  const [deviceWarnings, setDeviceWarnings] = useState<string[]>([]);
+  const [deviceMessages, setDeviceMessages] = useState<string[]>([]);
+  const [cardList, setCardList] = useState<string[]>([]);        // ["npu:0", "npu:2", ...]
+  const [numDevices, setNumDevices] = useState(1);               // 并行卡数
+  const [batchText, setBatchText] = useState("");
   const [recogDemo, setRecogDemo] = useState<{ samples: any[]; accuracy: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const curveRef = useRef<typeof curveData>([]);
@@ -430,11 +432,26 @@ function Stage3() {
 
           switch (event.type) {
             case "device_info":
-              // 后端设备检测诊断信息（最先到达）
               setDevice(event.selected || event.device || "CPU");
               setDeviceUtil(0);
               setDeviceWarnings(event.warnings || []);
               setDeviceMessages(event.messages || []);
+              setCardList(event.card_list || []);
+              setNumDevices(event.num_devices || 1);
+              break;
+            case "device_util":
+              // 真实设备使用率（后端采样）
+              if (event.compute_util != null) {
+                setDeviceUtil(Math.round(event.compute_util));
+                setDeviceUtilLabel("compute");
+              } else if (event.memory_util != null) {
+                setDeviceUtil(Math.round(event.memory_util));
+                setDeviceUtilLabel("memory");
+              }
+              // 多卡信息更新
+              if (event.cards && event.cards.length > 0) {
+                setCardList(event.cards.map((c: any) => `npu:${c.id} ${c.usage}%`));
+              }
               break;
             case "train_start": setTotEpochs(event.epochs); setDevice(event.device || "CPU"); setDeviceUtil(0); setPhaseText(event.message || "加载数据中..."); break;
             case "batch_progress":
@@ -452,16 +469,6 @@ function Stage3() {
               setEpochLog(prev => [...prev.slice(-20), `[Epoch ${event.epoch}/${event.total_epochs}] train_loss: ${event.train_loss.toFixed(4)}  train_acc: ${(event.train_acc*100).toFixed(1)}%  val_acc: ${(event.val_acc*100).toFixed(1)}%`]);
               break;
             }
-            case "device_util":
-              // 真实设备使用率（后端采样）：优先显示计算利用率，其次内存利用率
-              if (event.compute_util != null) {
-                setDeviceUtil(Math.round(event.compute_util));
-                setDeviceUtilLabel("compute");
-              } else if (event.memory_util != null) {
-                setDeviceUtil(Math.round(event.memory_util));
-                setDeviceUtilLabel("memory");
-              }
-              break;
             case "train_done": setPhaseText(event.message || `训练完成! 测试准确率 ${((event.test_acc||0)*100).toFixed(1)}%`); break;
             case "done":
               setPhaseText(event.message || "实验完成");
@@ -521,21 +528,34 @@ function Stage3() {
               ))}
             </div>
           )}
-          {/* 设备使用率条（后端实时采样，非 epoch 进度） */}
+          {/* 设备使用率条（后端实时采样） */}
           {device && (
-            <div className="flex items-center gap-3 mb-3">
-              <span className="text-[10px] font-medium text-gray-500 uppercase w-12">{device}</span>
-              <div className="flex-1 bg-gray-200 rounded-full h-2">
-                <div className="h-2 rounded-full bg-gradient-to-r from-blue-400 to-purple-500 transition-all duration-500"
-                  style={{ width: `${running || result ? deviceUtil : 0}%` }} />
-              </div>
-              <span className="text-[10px] text-gray-400 w-10 text-right">
-                {running || result ? `${deviceUtil}%` : "—"}
-              </span>
-              {deviceUtilLabel && (
-                <span className="text-[9px] text-gray-300">
-                  {deviceUtilLabel === "compute" ? "算力" : "显存"}
+            <div className="mb-3">
+              <div className="flex items-center gap-3 mb-1">
+                <span className="text-[10px] font-medium text-gray-500 uppercase w-12">{device.toUpperCase()}</span>
+                <div className="flex-1 bg-gray-200 rounded-full h-2">
+                  <div className="h-2 rounded-full bg-gradient-to-r from-blue-400 to-purple-500 transition-all duration-500"
+                    style={{ width: `${running || result ? deviceUtil : 0}%` }} />
+                </div>
+                <span className="text-[10px] text-gray-400 w-10 text-right">
+                  {running || result ? `${deviceUtil}%` : "—"}
                 </span>
+                {deviceUtilLabel && (
+                  <span className="text-[9px] text-gray-300">
+                    {deviceUtilLabel === "compute" ? "算力" : "显存"}
+                  </span>
+                )}
+                {numDevices > 1 && (
+                  <span className="text-[9px] text-purple-500 font-medium">{numDevices} 卡并行</span>
+                )}
+              </div>
+              {/* 多卡详情行 */}
+              {cardList.length > 0 && (
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 pl-14">
+                  {cardList.map((c, i) => (
+                    <span key={i} className="text-[10px] text-gray-400 font-mono">{c}</span>
+                  ))}
+                </div>
               )}
             </div>
           )}
