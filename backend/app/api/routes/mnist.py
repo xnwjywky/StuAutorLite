@@ -201,11 +201,16 @@ def list_runs(session_id: int | None = None, db: DbSession = Depends(get_db)):
 
 @router.get("/model-status")
 async def get_model_status(session_id: int | None = None):
-    """返回所有可选识别模型的状态列表（供前端下拉框）。
-    每个模型：id, name, params, description, status(cached|training|failed|not_available), selectable, progress, accuracy, type。
-    """
+    """返回所有可选识别模型的状态列表（供前端下拉框）。"""
     from app.core.mnist.model_manager import ModelManager
-    return {"models": ModelManager.get_all_model_info(session_id)}
+
+    models = ModelManager.get_all_model_info(session_id)
+    _mnist_log.info(
+        "model-status session=%s: %s",
+        session_id,
+        ", ".join(f"{m['id']}={m['status']}" for m in models),
+    )
+    return {"models": models}
 
 
 @router.get("/start-pretrain")

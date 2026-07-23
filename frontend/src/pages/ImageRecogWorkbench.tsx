@@ -16,6 +16,7 @@ import type { VisualizerStep } from "../components/ImageRecogVisualizer";
 import { useImageRecogStore, getDefaultAlgoParams } from "../stores/imageRecogStore";
 import { runImageRecogStream, saveQuestion, saveAnalysis, callMentor, callDataAnalyst, hasAgentConfig, logAgentError } from "../api/service";
 import { archiveSession } from "./Archive";
+import { renderMarkdown } from "../utils/markdown";
 import type { ResearchStage } from "../types";
 
 const STEPS: { key: ResearchStage; label: string }[] = [
@@ -548,7 +549,7 @@ function Stage7() {
   return (
     <StageContainer step={5} title="总结报告" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("RESULT_ANALYZED")}>← 上一步</button><button className="btn-primary" onClick={() => { archiveSession({ sessionId: store.sessionId, taskId: store.taskId, question: store.refinedQuestion || store.rawQuestion, hypothesis: store.hypothesis, algorithms: store.selectedAlgos, summary: store.experimentResult?.summary || null, analysis: store.studentAnalysis, reflection: {}, report: store.reportMarkdown, review: {} }); navigate("/archive"); }}>完成研究 → 档案</button></div>}>
       <div className="card"><div className="flex gap-2 mb-4"><button className={`btn-secondary text-sm ${!preview ? "bg-gray-300" : ""}`} onClick={() => setPreview(false)}>编辑</button><button className={`btn-secondary text-sm ${preview ? "bg-gray-300" : ""}`} onClick={() => setPreview(true)}>预览</button></div>
-        {preview ? <div className="min-h-[300px] border rounded-lg p-4 bg-white"><pre className="whitespace-pre-wrap font-sans text-gray-700 text-sm">{store.reportMarkdown}</pre></div> : <textarea className="w-full min-h-[300px] p-4 border rounded-lg font-mono text-sm resize-y" value={store.reportMarkdown} onChange={e => store.set({ reportMarkdown: e.target.value })} />}
+        {preview ? <div className="min-h-[300px] border rounded-lg p-4 bg-white">{renderMarkdown(store.reportMarkdown)}</div> : <textarea className="w-full min-h-[300px] p-4 border rounded-lg font-mono text-sm resize-y" value={store.reportMarkdown} onChange={e => store.set({ reportMarkdown: e.target.value })} />}
       </div>
     </StageContainer>
   );

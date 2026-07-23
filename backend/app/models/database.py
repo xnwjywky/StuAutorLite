@@ -38,6 +38,7 @@ class Session(Base):
     digits_runs = relationship("DigitsRun", back_populates="session", cascade="all, delete-orphan")
     imagerecog_runs = relationship("ImageRecogRun", back_populates="session", cascade="all, delete-orphan")
     mnist_runs = relationship("MNISTRun", back_populates="session", cascade="all, delete-orphan")
+    rl_runs = relationship("RLRun", back_populates="session", cascade="all, delete-orphan")
     analyses = relationship("AnalysisRecord", back_populates="session", cascade="all, delete-orphan")
     reports = relationship("ResearchReport", back_populates="session", cascade="all, delete-orphan")
     reflections = relationship("ReflectionQuestion", back_populates="session", cascade="all, delete-orphan")
@@ -369,6 +370,37 @@ class MNISTRun(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     session = relationship("Session", back_populates="mnist_runs")
+
+
+# ── 强化学习格子世界实验运行 ────────────────────────────
+class RLRun(Base):
+    __tablename__ = "rl_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
+    batch_id = Column(String(64), default="")
+    agent = Column(String(32), nullable=False)
+    grid_size = Column(Integer, default=8)
+    num_traps = Column(Integer, default=3)
+    num_episodes = Column(Integer, default=500)
+    learning_rate = Column(Float, default=0.1)
+    discount = Column(Float, default=0.9)
+    epsilon = Column(Float, default=0.1)
+    trial = Column(Integer, default=1)
+    seed = Column(Integer, default=0)
+    train_rewards = Column(Text, default="")
+    train_success = Column(Text, default="")
+    avg_reward = Column(Float, default=0)
+    success_rate = Column(Float, default=0)
+    test_success = Column(Integer, default=0)
+    test_reward = Column(Float, default=0)
+    test_path = Column(Text, default="")
+    world_json = Column(Text, default="")
+    test_world_json = Column(Text, default="")
+    runtime_ms = Column(Float, default=0)
+    created_at = Column(DateTime, server_default=func.now())
+
+    session = relationship("Session", back_populates="rl_runs")
 
 
 # ── 初始化 ───────────────────────────────────────────────

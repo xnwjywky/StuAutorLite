@@ -24,6 +24,7 @@ import {
   type ReflectionQuestion,
 } from "../api/service";
 import { archiveSession } from "./Archive";
+import { renderMarkdown } from "../utils/markdown";
 import { updateProfileScores } from "./ProfilePage";
 import type { ResearchStage, AlgorithmType, MetricType } from "../types";
 
@@ -763,7 +764,7 @@ function ReportEditor() {
       </div>
       {polishMsg && <p className={`text-xs mb-3 ${polishMsg.startsWith("✅") ? "text-green-600" : "text-amber-600"}`}>{polishMsg}</p>}
       {preview
-        ? <div className="min-h-[400px] border rounded-lg p-4 bg-white"><pre className="whitespace-pre-wrap font-sans text-gray-700 text-sm leading-relaxed">{store.reportMarkdown}</pre></div>
+        ? <div className="min-h-[400px] border rounded-lg p-4 bg-white">{renderMarkdown(store.reportMarkdown)}</div>
         : <textarea className="w-full min-h-[400px] p-4 border rounded-lg font-mono text-sm resize-y focus:outline-none focus:ring-2 focus:ring-gray-300" value={store.reportMarkdown} onChange={(e) => store.set({ reportMarkdown: e.target.value })} />
       }
     </div>

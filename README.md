@@ -43,8 +43,9 @@ cd .. && python run_tests.py
 | 🔍 字符串搜索 | 暴力/KMP/Boyer-Moore/Rabin-Karp (4个) | 合并于排序实验 | 文本+模式串滑动对比动画 |
 | 👁️ 图像识别 | 模板匹配/像素KNN/特征/决策树/MLP/CNN/随机 (7个) | `/workbench-imagerecog/:id` | 双模式：形状+MNIST CNN，SSE 流式训练 |
 | 🧠 MNIST CNN | MiniCNN/StandardCNN/DeepCNN/MLP (4架构) | `/workbench-mnist/:id` | PyTorch 训练 + 上传识别 + 预训练模型 |
+| 🤖 强化学习 | Q-learning / SARSA (2个) | `/workbench-rl/:id` | 格子世界机器人找金币 + Canvas 路径动画 |
 
-所有实验共享 7-9 阶段研究流程（问题→假设→设计→运行→分析→反思→报告→审稿），配有 AI Agent 引导。
+所有实验共享 5-9 阶段研究流程（问题→假设→设计→运行→分析→反思→报告→审稿），配有 AI Agent 引导。
 
 ## MNIST 手写数字识别
 
@@ -53,6 +54,13 @@ cd .. && python run_tests.py
 - **设备自动检测**：系统层探针 (nvidia-smi/npu-smi/dev/davinci) + PyTorch 层匹配，CUDA > MPS > NPU > CPU
 - **SSE 流式训练**：epoch 级实时推送 loss/accuracy 曲线、设备使用率
 - **上传图片识别**：下拉选择模型（3 个预训练 + 1 个用户训练），上传手写数字图片进行识别
+
+## 强化学习格子世界
+
+- **2 种 RL 算法**：Q-learning (off-policy) / SARSA (on-policy)
+- **可调参数**：地图大小 (6-10)、陷阱数量 (1-5)、训练局数 (200-1000)、学习率 α、折扣因子 γ、探索率 ε
+- **可视化**：Canvas 网格动画，机器人路径步进播放
+- **对比实验**：同地图公平对比算法性能
 
 ## AI Agent
 
@@ -66,6 +74,8 @@ cd .. && python run_tests.py
 - Reviewer — 审稿评分
 
 > Agent 配置默认值：API Base URL `https://api.deepseek.com/anthropic`，模型 `deepseek-v4-flash`。
+>
+> 所有实验通过首页"发现研究任务"卡片进入，机器人避障实验对应 `/workbench-rl/:id` 路由。
 
 ## 技术栈
 
@@ -93,6 +103,7 @@ cd .. && python run_tests.py
 │   │   │   ├── shaperecog/    # 图形识别算法 (7 个)
 │   │   │   ├── imagerecog/    # 统一图像识别 Runner
 │   │   │   ├── mnist/         # PyTorch CNN 训练 + 模型管理
+│   │   │   ├── rl/             # 强化学习格子世界 (GridWorld + Q-learning + SARSA)
 │   │   │   └── digits/        # 经典数字模板数据生成器
 │   │   ├── agents/            # 6 AI Agent
 │   │   ├── models/            # 数据库 ORM + Pydantic Schema

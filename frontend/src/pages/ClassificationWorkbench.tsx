@@ -21,6 +21,7 @@ import {
 } from "../api/service";
 import { archiveSession } from "./Archive";
 import { updateProfileScores } from "./ProfilePage";
+import { renderMarkdown } from "../utils/markdown";
 import type { ResearchStage, ClassifierType, ClassifyMetricType, DataPattern } from "../types";
 
 // ═══════════════════════════════════════════════════════════
@@ -539,7 +540,7 @@ function Stage8() {
             <div className="flex gap-2"><button className={`btn-secondary text-sm ${!preview ? "bg-gray-300" : ""}`} onClick={() => setPreview(false)}>编辑</button><button className={`btn-secondary text-sm ${preview ? "bg-gray-300" : ""}`} onClick={() => setPreview(true)}>预览</button></div>
             <button className="btn-secondary text-sm" onClick={handlePolish} disabled={polishing || !hasAgentConfig()}>{polishing ? "润色中..." : "🤖 AI 润色"}</button>
           </div>
-          {preview ? <div className="min-h-[400px] border rounded-lg p-4 bg-white"><pre className="whitespace-pre-wrap font-sans text-gray-700 text-sm leading-relaxed">{store.reportMarkdown}</pre></div> : <textarea className="w-full min-h-[400px] p-4 border rounded-lg font-mono text-sm resize-y focus:outline-none focus:ring-2 focus:ring-gray-300" value={store.reportMarkdown} onChange={(e) => store.set({ reportMarkdown: e.target.value })} />}
+          {preview ? <div className="min-h-[400px] border rounded-lg p-4 bg-white">{renderMarkdown(store.reportMarkdown)}</div> : <textarea className="w-full min-h-[400px] p-4 border rounded-lg font-mono text-sm resize-y focus:outline-none focus:ring-2 focus:ring-gray-300" value={store.reportMarkdown} onChange={(e) => store.set({ reportMarkdown: e.target.value })} />}
         </div>
       ) : <div className="card text-center py-12"><p className="text-gray-400 mb-4">系统将根据你前面的所有记录自动生成研究报告初稿</p><button className="btn-primary" onClick={handleGenerate} disabled={generating}>{generating ? "正在生成..." : "生成报告初稿"}</button></div>}
     </StageContainer>

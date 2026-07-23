@@ -31,9 +31,9 @@ const TASKS: TaskCard[] = [
   { id: "image_recognition", name: "图像识别算法", description: "图形识别（圆形/三角/正方形）+ 经典手写数字 + PyTorch MNIST CNN 深度学习，对比 KNN/决策树/MLP/CNN 等 7 种算法",
     difficulty: "进阶", icon: "🖼️", gradient: "from-sky-500 to-fuchsia-600",
     concepts: ["模板匹配", "KNN", "决策树", "MLP", "CNN", "PyTorch"], available: true },
-  { id: "robot_obstacle", name: "机器人避障", description: "让虚拟机器人在障碍物中自主导航，学会避开陷阱",
+  { id: "robot_obstacle", name: "机器人避障", description: "强化学习机器人找金币，对比 Q-learning 与 SARSA 的探索策略",
     difficulty: "进阶", icon: "🤖", gradient: "from-rose-500 to-pink-600",
-    concepts: ["路径规划", "传感器", "自主导航"], available: false },
+    concepts: ["Q-learning", "SARSA", "强化学习", "强化学习"], available: true },
   { id: "visual_algo_compare", name: "可视化算法比较", description: "排序算法（冒泡/归并/快排）+ 字符串搜索（KMP/BM/RK）双模式",
     difficulty: "入门", icon: "📈", gradient: "from-indigo-500 to-blue-700",
     concepts: ["排序算法", "字符串搜索", "算法复杂度"], available: true },
@@ -66,6 +66,8 @@ export default function TaskSelect() {
         ? `/workbench-digits/${sid}`
         : taskId === "image_recognition"
         ? `/workbench-imagerecog/${sid}`
+        : taskId === "robot_obstacle"
+        ? `/workbench-rl/${sid}`
         : `/workbench/${sid}`;
       navigate(route);
     } catch {

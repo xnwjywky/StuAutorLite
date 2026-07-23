@@ -7,9 +7,10 @@
 用户模型：
   - 训练完成后保存到 data/models/user_{session_id}.pth
   - 上传识别时按 session_id 加载
+
+⚠️ 所有 torch 导入均为延迟导入（函数体内 import），确保本模块可在无 PyTorch 环境中被 import。
 """
-import torch
-import torch.nn as nn
+from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
@@ -43,7 +44,7 @@ class ModelManager:
     _train_lock = threading.Lock()
 
     def __init__(self):
-        self._pretrained: dict[str, nn.Module] = {}   # arch_id -> model (on CPU)
+        self._pretrained: dict[str, object] = {}   # arch_id -> model (on CPU)
         self._user_model_cache: dict[int, dict] = {}  # session_id -> {"state_dict":..., "arch_config":...}
 
         # 启动时扫描文件系统初始化状态
@@ -62,11 +63,19 @@ class ModelManager:
 
     @classmethod
     def get_all_model_info(cls, session_id: int | None = None) -> list[dict]:
-        """返回所有可用模型的状态信息列表（4 个）。"""
+        """返回所有可用模型的状态信息列表（4 个）。
+        状态来源优先级：_training_status（运行时） > 文件系统 > "not_available"。"""
         models = []
+        mgr = cls.get_instance()
         for aid in PRETRAINED_IDS:
             meta = _MODEL_META.get(aid, {})
-            status = cls._training_status.get(aid, "not_available")
+            # 先查运行时状态，再查文件系统兜底（确保重启后也能检测到已有模型）
+            status = cls._training_status.get(aid)
+            if status != "cached" and mgr.is_pretrained_cached(aid):
+                status = "cached"
+                cls._training_status[aid] = "cached"  # 同步回状态
+            if not status:
+                status = "not_available"
             progress = cls._training_progress.get(aid, {})
             models.append({
                 "id": aid, "name": meta.get("name", aid),
@@ -132,6 +141,8 @@ class ModelManager:
 
     def _train_one_pretrained(self, arch_id: str, device: str = "cpu", epochs: int = 10):
         """训练单个预训练模型并保存。阻塞，在后台线程中调用。"""
+        import torch
+        import torch.nn as nn
         import numpy as np
         from torch.utils.data import DataLoader
         from torchvision import datasets, transforms
@@ -186,8 +197,10 @@ class ModelManager:
     def all_pretrained_cached(self) -> bool:
         return all(self.is_pretrained_cached(aid) for aid in PRETRAINED_IDS)
 
-    def load_pretrained(self, arch_id: str, device: str = "cpu") -> nn.Module | None:
+    def load_pretrained(self, arch_id: str, device: str = "cpu") -> "object | None":
         """加载缓存的预训练模型。"""
+        import torch
+        import torch.nn as nn
         pth = _MODELS_DIR / f"{arch_id}.pth"
         if not pth.exists():
             return None
@@ -209,6 +222,7 @@ class ModelManager:
 
     def save_user_model(self, session_id: int, state_dict: dict, arch_config: dict):
         """保存用户训练的模型权重和架构配置。"""
+        import torch
         pth = _MODELS_DIR / f"user_{session_id}.pth"
         torch.save({"state_dict": state_dict, "arch_config": arch_config}, str(pth))
         _log.info(f"用户模型 session={session_id} 已保存")
@@ -225,6 +239,7 @@ class ModelManager:
 
     def load_user_model(self, session_id: int, device: str = "cpu") -> nn.Module | None:
         """加载用户训练的模型。"""
+        import torch
         pth = _MODELS_DIR / f"user_{session_id}.pth"
         if not pth.exists():
             return None
@@ -257,9 +272,10 @@ class ModelManager:
 
 # ── 图片推理工具 ──
 
-def preprocess_upload_image(image_bytes: bytes, device: str = "cpu") -> "torch.Tensor | None":
+def preprocess_upload_image(image_bytes: bytes, device: str = "cpu"):
     """上传图片字节 → MNIST 标准输入 tensor (1,1,28,28)。"""
     try:
+        import torch
         from PIL import Image
         import io
         import numpy as np
@@ -280,8 +296,9 @@ def preprocess_upload_image(image_bytes: bytes, device: str = "cpu") -> "torch.T
         return None
 
 
-def run_inference(model: nn.Module, image_tensor: "torch.Tensor") -> dict:
+def run_inference(model, image_tensor) -> dict:
     """对单张图片运行推理，返回预测类别、置信度和各类别概率。"""
+    import torch
     device = image_tensor.device
     model.to(device).eval()
     with torch.no_grad():

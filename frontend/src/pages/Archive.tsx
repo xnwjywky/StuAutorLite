@@ -2,6 +2,7 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import Layout from "../components/Layout";
+import { renderMarkdown } from "../utils/markdown";
 
 interface ArchivedSession {
   id: string;
@@ -227,11 +228,13 @@ export default function Archive() {
                       </div>
                     </div>
                   )}
-                  {/* 报告全文预览 */}
+                  {/* 报告全文 — 与预览版一致的 Markdown 渲染 */}
                   {a.report && (
                     <div className="mt-3 pt-3 border-t border-gray-100">
                       <span className="font-medium text-gray-700 text-sm">报告全文：</span>
-                      <pre className="mt-1 text-xs text-gray-500 whitespace-pre-wrap max-h-64 overflow-y-auto bg-gray-50 p-3 rounded-lg">{a.report}</pre>
+                      <div className="mt-1 max-h-96 overflow-y-auto bg-white border rounded-lg p-4">
+                        {renderMarkdown(a.report)}
+                      </div>
                     </div>
                   )}
                 </div>

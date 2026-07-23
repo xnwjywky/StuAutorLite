@@ -21,6 +21,7 @@ import ShapeRecogWorkbench from "./pages/ShapeRecogWorkbench";
 import DigitsWorkbench from "./pages/DigitsWorkbench";
 import ImageRecogWorkbench from "./pages/ImageRecogWorkbench";
 import MNISTWorkbench from "./pages/MNISTWorkbench";
+import RLWorkbench from "./pages/RLWorkbench";
 
 export default function App() {
   return (
@@ -37,6 +38,7 @@ export default function App() {
       <Route path="/workbench-digits/:sessionId" element={<DigitsWorkbench />} />
       <Route path="/workbench-imagerecog/:sessionId" element={<ImageRecogWorkbench />} />
       <Route path="/workbench-mnist/:sessionId" element={<MNISTWorkbench />} />
+      <Route path="/workbench-rl/:sessionId" element={<RLWorkbench />} />
       <Route path="/question" element={<QuestionForm />} />
       <Route path="/hypothesis" element={<HypothesisForm />} />
       <Route path="/experiment-design" element={<ExperimentDesign />} />
