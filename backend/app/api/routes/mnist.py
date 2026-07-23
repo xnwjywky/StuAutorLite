@@ -157,6 +157,10 @@ def run_mnist(req: MNISTRunRequest, db: DbSession = Depends(get_db)):
 
 @router.post("/run-stream")
 async def run_mnist_stream(req: MNISTRunRequest):
+    _mnist_log.info(
+        "SSE stream start: session=%d arch=%s epochs=%d",
+        req.session_id, req.architecture.get("id", "?"), req.hyperparameters.get("epochs", 10),
+    )
     config = {
         "architecture": req.architecture,
         "hyperparameters": req.hyperparameters,
@@ -177,10 +181,10 @@ async def run_mnist_stream(req: MNISTRunRequest):
                 if event["type"] in ("done", "error"):
                     break
         except StopIteration:
-            pass
+            _mnist_log.info("SSE stream: generator exhausted normally")
         except Exception as e:
-            _mnist_log.error(f"SSE stream crashed: {str(e)}", exc_info=True)
-            yield f"data: {json.dumps({'type':'error','message':f'训练异常: {str(e)}'}, ensure_ascii=False)}\n\n"
+            _mnist_log.error(f"SSE stream crashed: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type':'error','message':f'训练异常: {str(e)[:500]}'}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         event_stream(),

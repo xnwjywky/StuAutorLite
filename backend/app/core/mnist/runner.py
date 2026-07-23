@@ -6,13 +6,28 @@
 
 优先级：CUDA > MPS(Apple) > NPU(Ascend) > CPU
 若检测到 NPU 硬件但 torch-npu 未安装，会明确提示安装命令。
+
+所有训练相关日志写入 backend/logs/mnist_errors.log。
 """
 import time
 import json
 import subprocess
 import platform
 import os
+import logging
 from pathlib import Path
+
+# ── 训练专用日志 ──
+_LOG_DIR = Path(__file__).resolve().parent.parent.parent.parent / "logs"
+_LOG_DIR.mkdir(exist_ok=True)
+_train_log = logging.getLogger("mnist.train")
+_train_log.setLevel(logging.DEBUG)
+if not _train_log.handlers:
+    _fh = logging.FileHandler(str(_LOG_DIR / "mnist_errors.log"), encoding="utf-8")
+    _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    _train_log.addHandler(_fh)
+    # 控制台也输出，方便 uvicorn 日志直接看到
+    _train_log.addHandler(logging.StreamHandler())
 
 
 def _probe_hardware() -> dict:
@@ -374,7 +389,24 @@ class MNISTRunner:
         batch_size = hp.get("batch_size", 64)
         transform = self._get_transform()
 
-        # ── 设备诊断信息（始终先于 train_start 发送，即使 torchnpu 缺包也发送）──
+        _train_log.info("=" * 50)
+        _train_log.info(f"训练启动: arch={arch_config.get('name','?')} epochs={epochs} batch={batch_size}")
+        _train_log.info(f"设备检测: selected={device_diag['selected']} detected={device_diag['detected']} usable={device_diag['usable']}")
+        _train_log.info(f"设备警告: {device_diag['warnings']}")
+        _train_log.info(f"设备消息: {device_diag['messages']}")
+
+        # ── NPU 诊断：打印 torch_npu 版本和可用设备数 ──
+        if device.type == "npu":
+            _train_log.info(f"NPU 模式激活，device={device}")
+            try:
+                _train_log.info(
+                    f"NPU device_count={torch.npu.device_count()}, "
+                    f"device_name={torch.npu.get_device_name(0) if torch.npu.device_count()>0 else 'N/A'}"
+                )
+            except Exception as e:
+                _train_log.error(f"NPU 设备查询失败: {e}")
+
+        # ── 设备诊断信息 ──
         yield {
             "type": "device_info",
             "device": str(device),
@@ -397,12 +429,16 @@ class MNISTRunner:
             "device": str(device),
             "message": f"加载 MNIST 数据集... 设备: {device}",
         }
-        # 初始设备使用率（加载数据集后）
+
+        # 初始设备使用率
         init_util = MNISTRunner._sample_device_utilization(device)
         if init_util:
             yield {"type": "device_util", "epoch": 0, "total_epochs": epochs,
                    "device": str(device), **init_util}
+            _train_log.info(f"初始设备使用率: {init_util}")
 
+        # ── 数据加载 ──
+        _train_log.info("加载 MNIST 数据集...")
         try:
             full_dataset = datasets.MNIST(
                 root="./data", train=True, download=True, transform=transform
@@ -410,7 +446,9 @@ class MNISTRunner:
             test_dataset = datasets.MNIST(
                 root="./data", train=False, download=True, transform=transform
             )
+            _train_log.info(f"数据集加载完成: train={len(full_dataset)}, test={len(test_dataset)}")
         except Exception as e:
+            _train_log.error(f"MNIST 数据加载失败: {e}", exc_info=True)
             yield {"type": "error", "message": f"MNIST 数据加载失败: {str(e)}"}
             return
 
@@ -423,84 +461,115 @@ class MNISTRunner:
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
         test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
+        # ── 模型构建 + 移动到设备 ──
+        _train_log.info(f"构建模型 {arch_config.get('name','?')} → 移动到 {device}...")
         try:
-            model = build_model(arch_config).to(device)
+            model = build_model(arch_config)
+            _train_log.info(f"模型构建完成, 参数量: {sum(p.numel() for p in model.parameters())}")
+            model = model.to(device)
+            _train_log.info(f"模型已移动到 {device}")
         except Exception as e:
-            yield {"type": "error", "message": f"模型构建失败: {str(e)}"}
+            _train_log.error(f"模型构建/移动到设备失败: {e}", exc_info=True)
+            yield {"type": "error", "message": f"模型构建失败: {str(e)}。设备={device}，请确认 torch 已正确安装并支持该设备。"}
             return
 
-        optimizer = self._build_optimizer(model, hp)
-        criterion = nn.CrossEntropyLoss()
+        # ── 训练整段包裹在 try/except 中，捕获 NPU 运行时错误 ──
+        try:
+            optimizer = self._build_optimizer(model, hp)
+            criterion = nn.CrossEntropyLoss()
 
-        train_losses, train_accs = [], []
-        val_losses, val_accs = [], []
-        best_val_acc = 0.0
-        best_epoch = 0
-        start_time = time.time()
+            train_losses, train_accs = [], []
+            val_losses, val_accs = [], []
+            best_val_acc = 0.0
+            best_epoch = 0
+            start_time = time.time()
 
-        for epoch in range(epochs):
-            yield {
-                "type": "epoch_start",
-                "epoch": epoch + 1,
-                "total_epochs": epochs,
-                "message": f"Epoch {epoch + 1}/{epochs} 训练中...",
-            }
-            model.train()
-            train_loss, train_correct, train_total = 0.0, 0, 0
-            for data, target in train_loader:
-                data, target = data.to(device), target.to(device)
-                optimizer.zero_grad()
-                output = model(data)
-                loss = criterion(output, target)
-                loss.backward()
-                optimizer.step()
-                train_loss += loss.item() * data.size(0)
-                _, predicted = output.max(1)
-                train_total += target.size(0)
-                train_correct += predicted.eq(target).sum().item()
-
-            train_loss_avg = train_loss / train_total
-            train_acc_avg = train_correct / train_total
-
-            model.eval()
-            val_loss, val_correct, val_total = 0.0, 0, 0
-            with torch.no_grad():
-                for data, target in val_loader:
-                    data, target = data.to(device), target.to(device)
-                    output = model(data)
-                    val_loss += criterion(output, target).item() * data.size(0)
-                    _, predicted = output.max(1)
-                    val_total += target.size(0)
-                    val_correct += predicted.eq(target).sum().item()
-
-            val_loss_avg = val_loss / val_total
-            val_acc_avg = val_correct / val_total
-            train_losses.append(round(train_loss_avg, 4))
-            train_accs.append(round(train_acc_avg, 4))
-            val_losses.append(round(val_loss_avg, 4))
-            val_accs.append(round(val_acc_avg, 4))
-
-            if val_acc_avg > best_val_acc:
-                best_val_acc = val_acc_avg
-                best_epoch = epoch + 1
-                best_model_state = {
-                    k: v.cpu().clone() for k, v in model.state_dict().items()
+            _train_log.info(f"开始训练循环 epochs={epochs}...")
+            for epoch in range(epochs):
+                yield {
+                    "type": "epoch_start",
+                    "epoch": epoch + 1,
+                    "total_epochs": epochs,
+                    "message": f"Epoch {epoch + 1}/{epochs} 训练中...",
                 }
+                model.train()
+                train_loss, train_correct, train_total = 0.0, 0, 0
+                for batch_idx, (data, target) in enumerate(train_loader):
+                    try:
+                        data, target = data.to(device), target.to(device)
+                    except Exception as e:
+                        _train_log.error(f"Epoch {epoch+1} batch {batch_idx}: data.to({device}) 失败: {e}")
+                        raise
+                    optimizer.zero_grad()
+                    output = model(data)
+                    loss = criterion(output, target)
+                    loss.backward()
+                    optimizer.step()
+                    train_loss += loss.item() * data.size(0)
+                    _, predicted = output.max(1)
+                    train_total += target.size(0)
+                    train_correct += predicted.eq(target).sum().item()
 
+                    # 第一个 batch 日志
+                    if epoch == 0 and batch_idx == 0:
+                        _train_log.info(
+                            f"第一个 batch 完成: device={device}, "
+                            f"data.device={data.device}, loss={loss.item():.4f}"
+                        )
+
+                train_loss_avg = train_loss / train_total
+                train_acc_avg = train_correct / train_total
+
+                model.eval()
+                val_loss, val_correct, val_total = 0.0, 0, 0
+                with torch.no_grad():
+                    for data, target in val_loader:
+                        data, target = data.to(device), target.to(device)
+                        output = model(data)
+                        val_loss += criterion(output, target).item() * data.size(0)
+                        _, predicted = output.max(1)
+                        val_total += target.size(0)
+                        val_correct += predicted.eq(target).sum().item()
+
+                val_loss_avg = val_loss / val_total
+                val_acc_avg = val_correct / val_total
+                train_losses.append(round(train_loss_avg, 4))
+                train_accs.append(round(train_acc_avg, 4))
+                val_losses.append(round(val_loss_avg, 4))
+                val_accs.append(round(val_acc_avg, 4))
+
+                if val_acc_avg > best_val_acc:
+                    best_val_acc = val_acc_avg
+                    best_epoch = epoch + 1
+                    best_model_state = {
+                        k: v.cpu().clone() for k, v in model.state_dict().items()
+                    }
+
+                yield {
+                    "type": "epoch_end", "epoch": epoch + 1, "total_epochs": epochs,
+                    "train_loss": round(train_loss_avg, 4), "train_acc": round(train_acc_avg, 4),
+                    "val_loss": round(val_loss_avg, 4), "val_acc": round(val_acc_avg, 4),
+                    "message": (
+                        f"Epoch {epoch+1}/{epochs}: train_loss={train_loss_avg:.4f} "
+                        f"train_acc={train_acc_avg*100:.1f}% val_acc={val_acc_avg*100:.1f}%"
+                    ),
+                }
+                # 每 epoch 后采样真实设备使用率
+                dev_util = MNISTRunner._sample_device_utilization(device)
+                if dev_util:
+                    yield {"type": "device_util", "epoch": epoch + 1,
+                           "total_epochs": epochs, "device": str(device), **dev_util}
+
+        except Exception as e:
+            _train_log.error(f"训练循环崩溃: {e}", exc_info=True)
             yield {
-                "type": "epoch_end", "epoch": epoch + 1, "total_epochs": epochs,
-                "train_loss": round(train_loss_avg, 4), "train_acc": round(train_acc_avg, 4),
-                "val_loss": round(val_loss_avg, 4), "val_acc": round(val_acc_avg, 4),
+                "type": "error",
                 "message": (
-                    f"Epoch {epoch+1}/{epochs}: train_loss={train_loss_avg:.4f} "
-                    f"train_acc={train_acc_avg*100:.1f}% val_acc={val_acc_avg*100:.1f}%"
+                    f"训练异常 (设备={device}): {str(e)[:300]}。"
+                    f"请检查 backend/logs/mnist_errors.log 查看完整堆栈。"
                 ),
             }
-            # 每 epoch 后采样真实设备使用率
-            dev_util = MNISTRunner._sample_device_utilization(device)
-            if dev_util:
-                yield {"type": "device_util", "epoch": epoch + 1,
-                       "total_epochs": epochs, "device": str(device), **dev_util}
+            return
 
         # ── 最终测试：混淆矩阵 + 错误案例 ──
         if best_epoch > 0:
@@ -545,6 +614,11 @@ class MNISTRunner:
         test_acc = test_correct / test_total
         overfitting = train_accs[-1] - test_acc
         training_time = round(time.time() - start_time, 1)
+
+        _train_log.info(
+            f"训练完成: test_acc={test_acc*100:.1f}% overfitting={overfitting*100:.1f}% "
+            f"time={training_time}s best_epoch={best_epoch}"
+        )
 
         yield {
             "type": "train_done",
@@ -592,10 +666,9 @@ class MNISTRunner:
                 ModelManager.get_instance().save_user_model(
                     int(session_id), best_model_state, arch_config
                 )
+                _train_log.info(f"用户模型已保存 session={session_id}")
             except Exception as e:
-                import logging
-                _mnist_save_log = logging.getLogger("mnist")
-                _mnist_save_log.error(f"保存用户模型失败 session={session_id}: {e}", exc_info=True)
+                _train_log.error(f"保存用户模型失败 session={session_id}: {e}", exc_info=True)
 
         result = {
             "status": "COMPLETED",
