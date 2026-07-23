@@ -92,37 +92,125 @@ def _probe_hardware() -> dict:
     return hw
 
 
-def _pick_idle_npu() -> int:
-    """检测多卡 NPU 中空闲率最高的卡，返回卡索引（0-based）。
-    通过 npu-smi info 解析各卡的 AI Core 使用率，选最低值。
-    失败时返回 0（使用默认卡）。"""
+def _pick_idle_npus(max_devices: int = 8, busy_threshold: int = 15) -> list[int]:
+    """检测多卡 NPU 中使用率低于 busy_threshold% 的卡，按空闲度排序返回。
+    最多返回 max_devices 个，至少返回卡 0（兜底）。
+    失败或只有单卡时返回 [0]。"""
+    import re
     try:
         r = subprocess.run(
             ["npu-smi", "info", "-t", "usg", "-i", "-1"],
             capture_output=True, text=True, timeout=5,
         )
         if r.returncode != 0:
-            return 0
-        # npu-smi 输出格式类似：NPU ID | AI Core(%) | ...
-        # 解析每行中的数字
-        import re
-        usages: list[tuple[int, float]] = []
+            return [0]
+        idles: list[tuple[int, float]] = []
         for line in r.stdout.splitlines():
-            # 匹配 "0" 或 "0   10" 这类 NPU ID + 使用率
             m = re.match(r"\s*(\d+)\s+(\d+)", line)
             if m:
                 npu_id = int(m.group(1))
                 usage = float(m.group(2))
-                usages.append((npu_id, usage))
-        if not usages:
-            return 0
-        # 选使用率最低的卡
-        usages.sort(key=lambda x: x[1])
-        best_id = usages[0][0]
-        _train_log.info(f"NPU 空闲检测: 各卡使用率={[(i, f'{u:.0f}%') for i,u in usages]} → 选用 npu:{best_id}")
-        return best_id
+                if usage < busy_threshold:
+                    idles.append((npu_id, usage))
+        if not idles:
+            return [0]
+        idles.sort(key=lambda x: x[1])
+        selected = idles[:max_devices]
+        ids = [i for i, _ in selected]
+        _train_log.info(
+            f"NPU 多卡检测: 共 {len(r.stdout.splitlines())} 卡中空闲 {len(idles)} 卡"
+            f" → 选用 {len(ids)} 卡 {ids} (使用率: {[f'{u:.0f}%' for _,u in selected]})"
+        )
+        return ids
     except Exception:
-        return 0
+        return [0]
+
+
+def _pick_idle_cudas(max_devices: int = 8, busy_threshold: int = 15) -> list[int]:
+    """检测多卡 CUDA GPU 中使用率低于 busy_threshold% 的卡。
+    最多返回 max_devices 个，至少返回卡 0（兜底）。
+    nvidia-smi 不可用时直接返回所有可见 CUDA 卡。"""
+    import re, torch
+    try:
+        cuda_count = torch.cuda.device_count()
+        if cuda_count <= 1:
+            return [0] if cuda_count == 1 else [0]
+        # 先尝试 nvidia-smi
+        r = subprocess.run(
+            ["nvidia-smi", "--query-gpu=index,utilization.gpu",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode != 0:
+            # nvidia-smi 不可用 → 返回所有 CUDA 卡
+            return list(range(min(cuda_count, max_devices)))
+
+        idles: list[tuple[int, float]] = []
+        for line in r.stdout.splitlines():
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) >= 2:
+                gpu_id = int(parts[0])
+                usage = float(parts[1])
+                if usage < busy_threshold:
+                    idles.append((gpu_id, usage))
+        if not idles:
+            _train_log.warning("所有 GPU 使用率均 >=15%，仅使用 GPU 0")
+            return [0]
+        idles.sort(key=lambda x: x[1])
+        selected = idles[:max_devices]
+        ids = [i for i, _ in selected]
+        _train_log.info(
+            f"CUDA 多卡检测: 共 {cuda_count} 卡中空闲 {len(idles)} 卡"
+            f" → 选用 {len(ids)} 卡 {ids} (使用率: {[f'{u:.0f}%' for _,u in selected]})"
+        )
+        return ids
+    except Exception:
+        import torch
+        count = torch.cuda.device_count()
+        return list(range(min(count, max_devices))) if count > 1 else [0]
+
+
+def _setup_multi_device(model, device, batch_size, train_ds, val_ds, test_ds):
+    """统一多卡加速入口 — NPU / CUDA / MPS / CPU 均适配。
+    返回 (wrapped_model, final_device, final_batch_size, train_loader, val_loader, test_loader, num_devices)。"""
+    import torch.nn as nn
+    from torch.utils.data import DataLoader
+
+    num_devices = 1
+    device_ids: list[int] = []
+
+    if device.type == "npu":
+        device_ids = _pick_idle_npus()
+    elif device.type == "cuda":
+        device_ids = _pick_idle_cudas()
+
+    if len(device_ids) > 1:
+        # ── 多卡 DataParallel ──
+        if device.type == "npu":
+            torch.npu.set_device(device_ids[0])
+        elif device.type == "cuda":
+            torch.cuda.set_device(device_ids[0])
+
+        device = torch.device(f"{device.type}:{device_ids[0]}")
+        model = model.to(device)
+        model = nn.DataParallel(model, device_ids=device_ids)
+
+        new_bs = int(batch_size) * len(device_ids)
+        _train_log.info(
+            f"多卡 DataParallel: {device.type.upper()} {len(device_ids)} 卡 {device_ids}, "
+            f"batch_size={batch_size}→{new_bs}"
+        )
+        batch_size = new_bs
+        num_devices = len(device_ids)
+    else:
+        model = model.to(device)
+        _train_log.info(f"单设备: {device}")
+
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False)
+    test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False)
+
+    return model, device, batch_size, train_loader, val_loader, test_loader, num_devices
 
 
 def _detect_device():
@@ -186,14 +274,9 @@ def _detect_device():
             if npu_ok:
                 usable.append("npu")
                 hw["npu"]["ready"] = True
-                # 多卡 NPU：检测空闲卡，优先使用使用率最低的
-                npu_idx = _pick_idle_npu()
-                device = torch.device(f"npu:{npu_idx}")
-                try:
-                    name = torch.npu.get_device_name(npu_idx)
-                except Exception:
-                    name = f"Ascend NPU #{npu_idx}"
-                messages.append(f"✓ 华为昇腾 NPU 可用 — {name} (npu:{npu_idx})")
+                count = torch.npu.device_count()
+                device = torch.device("npu:0")
+                messages.append(f"✓ 华为昇腾 NPU 可用 — {count} 卡 (训练时自动选空闲卡并行)")
             else:
                 # ── 4. CPU（兜底）+ 诊断 ──
                 if hw["npu"]["detected"]:
@@ -369,7 +452,7 @@ class MNISTRunner:
             except ImportError:
                 pass
             import torch.nn as nn
-            from torch.utils.data import DataLoader, random_split
+            from torch.utils.data import random_split
             from torchvision import datasets
         except ModuleNotFoundError as e:
             pkg = getattr(e, "name", str(e))
@@ -492,20 +575,23 @@ class MNISTRunner:
             full_dataset, [train_size, len(full_dataset) - train_size]
         )
 
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-
-        # ── 模型构建 + 移动到设备 ──
-        _train_log.info(f"构建模型 {arch_config.get('name','?')} → 移动到 {device}...")
+        # ── 模型构建 + 统一多卡加速 (NPU/CUDA/CPU 均适配) ──
+        _train_log.info(f"构建模型 {arch_config.get('name','?')}...")
         try:
             model = build_model(arch_config)
-            _train_log.info(f"模型构建完成, 参数量: {sum(p.numel() for p in model.parameters())}")
-            model = model.to(device)
-            _train_log.info(f"模型已移动到 {device}")
+            param_count = sum(p.numel() for p in model.parameters())
+            _train_log.info(f"模型构建完成, 参数量: {param_count}")
+
+            (
+                model, device, batch_size,
+                train_loader, val_loader, test_loader, num_devices,
+            ) = _setup_multi_device(
+                model, device, batch_size,
+                train_dataset, val_dataset, test_dataset,
+            )
         except Exception as e:
-            _train_log.error(f"模型构建/移动到设备失败: {e}", exc_info=True)
-            yield {"type": "error", "message": f"模型构建失败: {str(e)}。设备={device}，请确认 torch 已正确安装并支持该设备。"}
+            _train_log.error(f"模型构建/多卡加速失败: {e}", exc_info=True)
+            yield {"type": "error", "message": f"模型构建失败: {str(e)}。设备={device}"}
             return
 
         # ── 训练整段包裹在 try/except 中，捕获 NPU 运行时错误 ──
