@@ -17,7 +17,7 @@ import os
 import logging
 from pathlib import Path
 
-# ── 训练专用日志 ──
+# ── 训练专用日志（仅写文件，不输出到控制台）──
 _LOG_DIR = Path(__file__).resolve().parent.parent.parent.parent / "logs"
 _LOG_DIR.mkdir(exist_ok=True)
 _train_log = logging.getLogger("mnist.train")
@@ -26,8 +26,8 @@ if not _train_log.handlers:
     _fh = logging.FileHandler(str(_LOG_DIR / "mnist_errors.log"), encoding="utf-8")
     _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
     _train_log.addHandler(_fh)
-    # 控制台也输出，方便 uvicorn 日志直接看到
-    _train_log.addHandler(logging.StreamHandler())
+    # 不再输出到 StreamHandler — 训练日志量大，会淹没 uvicorn 控制台
+    _train_log.propagate = False  # 也不向 root logger 传播
 
 
 def _probe_hardware() -> dict:
@@ -92,6 +92,39 @@ def _probe_hardware() -> dict:
     return hw
 
 
+def _pick_idle_npu() -> int:
+    """检测多卡 NPU 中空闲率最高的卡，返回卡索引（0-based）。
+    通过 npu-smi info 解析各卡的 AI Core 使用率，选最低值。
+    失败时返回 0（使用默认卡）。"""
+    try:
+        r = subprocess.run(
+            ["npu-smi", "info", "-t", "usg", "-i", "-1"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode != 0:
+            return 0
+        # npu-smi 输出格式类似：NPU ID | AI Core(%) | ...
+        # 解析每行中的数字
+        import re
+        usages: list[tuple[int, float]] = []
+        for line in r.stdout.splitlines():
+            # 匹配 "0" 或 "0   10" 这类 NPU ID + 使用率
+            m = re.match(r"\s*(\d+)\s+(\d+)", line)
+            if m:
+                npu_id = int(m.group(1))
+                usage = float(m.group(2))
+                usages.append((npu_id, usage))
+        if not usages:
+            return 0
+        # 选使用率最低的卡
+        usages.sort(key=lambda x: x[1])
+        best_id = usages[0][0]
+        _train_log.info(f"NPU 空闲检测: 各卡使用率={[(i, f'{u:.0f}%') for i,u in usages]} → 选用 npu:{best_id}")
+        return best_id
+    except Exception:
+        return 0
+
+
 def _detect_device():
     """自动检测最佳可用设备并返回诊断信息。
     返回: (torch.device, diagnostic_dict)
@@ -153,12 +186,14 @@ def _detect_device():
             if npu_ok:
                 usable.append("npu")
                 hw["npu"]["ready"] = True
+                # 多卡 NPU：检测空闲卡，优先使用使用率最低的
+                npu_idx = _pick_idle_npu()
+                device = torch.device(f"npu:{npu_idx}")
                 try:
-                    name = torch.npu.get_device_name(0)
+                    name = torch.npu.get_device_name(npu_idx)
                 except Exception:
-                    name = "Ascend NPU"
-                messages.append(f"✓ 华为昇腾 NPU 可用 — {name}")
-                device = torch.device("npu")
+                    name = f"Ascend NPU #{npu_idx}"
+                messages.append(f"✓ 华为昇腾 NPU 可用 — {name} (npu:{npu_idx})")
             else:
                 # ── 4. CPU（兜底）+ 诊断 ──
                 if hw["npu"]["detected"]:
@@ -494,6 +529,8 @@ class MNISTRunner:
                 }
                 model.train()
                 train_loss, train_correct, train_total = 0.0, 0, 0
+                total_batches = len(train_loader)
+                last_progress_time = time.time()
                 for batch_idx, (data, target) in enumerate(train_loader):
                     try:
                         data, target = data.to(device), target.to(device)
@@ -510,7 +547,24 @@ class MNISTRunner:
                     train_total += target.size(0)
                     train_correct += predicted.eq(target).sum().item()
 
-                    # 第一个 batch 日志
+                    # 每 ~200 batch 或 2 秒发送一次进度，避免前端以为卡住
+                    if batch_idx > 0 and (
+                        batch_idx % 200 == 0
+                        or time.time() - last_progress_time > 2.0
+                    ):
+                        yield {
+                            "type": "batch_progress",
+                            "epoch": epoch + 1,
+                            "total_epochs": epochs,
+                            "batch": batch_idx,
+                            "total_batches": total_batches,
+                            "current_loss": round(loss.item(), 4),
+                            "current_acc": round(
+                                train_correct / train_total, 4
+                            ) if train_total > 0 else 0,
+                        }
+                        last_progress_time = time.time()
+
                     if epoch == 0 and batch_idx == 0:
                         _train_log.info(
                             f"第一个 batch 完成: device={device}, "

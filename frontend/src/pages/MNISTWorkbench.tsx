@@ -335,6 +335,7 @@ function Stage3() {
   const [deviceUtilLabel, setDeviceUtilLabel] = useState("");   // "compute" | "memory" | ""
   const [deviceWarnings, setDeviceWarnings] = useState<string[]>([]);  // 设备诊断警告
   const [deviceMessages, setDeviceMessages] = useState<string[]>([]);  // 设备诊断消息
+  const [batchText, setBatchText] = useState("");              // batch 级进度文字
   const [recogDemo, setRecogDemo] = useState<{ samples: any[]; accuracy: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const curveRef = useRef<typeof curveData>([]);
@@ -436,8 +437,15 @@ function Stage3() {
               setDeviceMessages(event.messages || []);
               break;
             case "train_start": setTotEpochs(event.epochs); setDevice(event.device || "CPU"); setDeviceUtil(0); setPhaseText(event.message || "加载数据中..."); break;
-            case "epoch_start": setCurEpoch(event.epoch || 1); break;
+            case "batch_progress":
+              // 训练中 batch 级进度，防止前端以为卡住
+              setBatchText(
+                `Epoch ${event.epoch}/${event.total_epochs} · batch ${event.batch}/${event.total_batches} · loss=${(event.current_loss ?? 0).toFixed(4)}`
+              );
+              break;
+            case "epoch_start": setCurEpoch(event.epoch || 1); setBatchText(""); break;
             case "epoch_end": {
+              setBatchText("");
               const ep = { epoch: event.epoch, train_loss: event.train_loss, val_loss: event.val_loss, train_acc: event.train_acc, val_acc: event.val_acc };
               curveRef.current = [...curveRef.current, ep]; setCurveData([...curveRef.current]);
               setCurEpoch(event.epoch);
@@ -536,7 +544,9 @@ function Stage3() {
             <div className="flex items-center gap-2 mb-2">
               <span className="inline-block w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
               <span className="text-xs text-blue-600 font-medium">
-                {totEpochs > 0 ? `Epoch ${curEpoch}/${totEpochs}` : "准备训练数据..."}
+                {totEpochs > 0
+                  ? (batchText || `Epoch ${curEpoch}/${totEpochs}`)
+                  : "准备训练数据..."}
               </span>
             </div>
           )}
