@@ -93,35 +93,85 @@ def _probe_hardware() -> dict:
 
 
 def _pick_idle_npus(max_devices: int = 8, busy_threshold: int = 15) -> list[int]:
-    """检测多卡 NPU 中使用率低于 busy_threshold% 的卡，按空闲度排序返回。
-    最多返回 max_devices 个，至少返回卡 0（兜底）。
-    失败或只有单卡时返回 [0]。"""
-    import re
+    """检测所有空闲 NPU 卡（使用率 < busy_threshold%），最多 max_devices 张。
+    尝试多种 npu-smi 命令格式以兼容不同固件版本。
+    兜底：通过 torch.npu.device_count() 直接返回所有可见卡。"""
+    import re, torch
+
+    def _parse_usage(stdout: str) -> list[tuple[int, float]]:
+        """从 npu-smi 输出中解析 (卡ID, 使用率) 列表"""
+        pairs: list[tuple[int, float]] = []
+        for line in stdout.splitlines():
+            # 尝试匹配 "ID  USAGE" 或 "0  2%" 或 "0   2 %" 等格式
+            nums = re.findall(r"(\d+)\s*%?", line)
+            if len(nums) >= 2:
+                try:
+                    npu_id = int(nums[0])
+                    usage = float(nums[1])
+                    pairs.append((npu_id, usage))
+                except ValueError:
+                    continue
+        return pairs
+
+    # ── 方法 1: npu-smi info 单卡查询轮询 ──
     try:
-        r = subprocess.run(
-            ["npu-smi", "info", "-t", "usg", "-i", "-1"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if r.returncode != 0:
-            return [0]
+        total_cards = torch.npu.device_count()
+        if total_cards <= 1:
+            return [0] if total_cards == 1 else [0]
         idles: list[tuple[int, float]] = []
-        for line in r.stdout.splitlines():
-            m = re.match(r"\s*(\d+)\s+(\d+)", line)
-            if m:
-                npu_id = int(m.group(1))
-                usage = float(m.group(2))
-                if usage < busy_threshold:
-                    idles.append((npu_id, usage))
-        if not idles:
-            return [0]
-        idles.sort(key=lambda x: x[1])
-        selected = idles[:max_devices]
-        ids = [i for i, _ in selected]
-        _train_log.info(
-            f"NPU 多卡检测: 共 {len(r.stdout.splitlines())} 卡中空闲 {len(idles)} 卡"
-            f" → 选用 {len(ids)} 卡 {ids} (使用率: {[f'{u:.0f}%' for _,u in selected]})"
-        )
-        return ids
+        for card_id in range(min(total_cards, 32)):
+            try:
+                r = subprocess.run(
+                    ["npu-smi", "info", "-t", "usg", "-i", str(card_id)],
+                    capture_output=True, text=True, timeout=3,
+                )
+                if r.returncode == 0:
+                    nums = re.findall(r"(\d+)", r.stdout)
+                    if nums:
+                        usage = float(nums[0])
+                        if usage < busy_threshold:
+                            idles.append((card_id, usage))
+            except Exception:
+                pass
+        if idles:
+            idles.sort(key=lambda x: x[1])
+            selected = idles[:max_devices]
+            ids = [i for i, _ in selected]
+            _train_log.info(
+                f"NPU 多卡(轮询): {total_cards}卡检出{len(idles)}空闲"
+                f" → 选用{len(ids)}卡 {ids} (使用率: {[f'{u:.0f}%' for _,u in selected]})"
+            )
+            return ids
+    except Exception as e:
+        _train_log.info(f"NPU 轮询失败: {e}")
+
+    # ── 方法 2: npu-smi info -m / info -l 批量查询 ──
+    for cmd in (["npu-smi", "info", "-m"], ["npu-smi", "info", "-l"]):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            if r.returncode != 0:
+                continue
+            pairs = _parse_usage(r.stdout)
+            if pairs:
+                idles = [(i, u) for i, u in pairs if u < busy_threshold]
+                if idles:
+                    idles.sort(key=lambda x: x[1])
+                    selected = idles[:max_devices]
+                    ids = [i for i, _ in selected]
+                    _train_log.info(
+                        f"NPU 多卡({cmd[-1]}): {len(pairs)}卡检出{len(idles)}空闲"
+                        f" → 选用{len(ids)}卡 {ids}"
+                    )
+                    return ids
+        except Exception:
+            continue
+
+    # ── 兜底: 返回所有 torch 可见卡 ──
+    try:
+        total = torch.npu.device_count()
+        ids = list(range(min(total, max_devices)))
+        _train_log.info(f"NPU 兜底: 无法查询使用率, 直接返回 {len(ids)} 卡 {ids}")
+        return ids if ids else [0]
     except Exception:
         return [0]
 
