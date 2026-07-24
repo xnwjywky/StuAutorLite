@@ -354,6 +354,8 @@ def _detect_device():
 
 
 class MNISTRunner:
+    _dp_device_ids: "list[int] | None" = None  # 记录多卡训练使用的卡 ID，供采样使用
+
     def __init__(self):
         self._transform = None
 
@@ -426,59 +428,64 @@ class MNISTRunner:
                         pass
 
             elif device.type == "npu":
-                # ── NPU (华为 Ascend): torch.npu 内存统计 ──
+                # ── NPU: torch.npu 内存（每卡） + npu-smi info -m 算力 ──
                 try:
                     import torch_npu
                 except ImportError:
                     pass
-                try:
-                    # 单卡: device.index 可能是 None → 取 int(device.index or 0)
-                    idx = int(device.index if device.index is not None else 0)
-                    allocated = torch.npu.memory_allocated(idx)
-                    total = torch.npu.get_device_properties(idx).total_memory
-                    result["memory_util"] = round(allocated / total * 100, 1)
-                    result["memory_allocated_mb"] = round(allocated / 1024 / 1024, 1)
-                    result["memory_total_mb"] = round(total / 1024 / 1024, 1)
-                except Exception as e:
-                    _train_log.info(f"NPU 内存统计失败: {e}")
 
-                # 尝试通过 npu-smi 采集各卡使用率 (多卡时采前 4 卡)
-                try:
-                    import subprocess, re
-                    target_card = int(device.index if device.index is not None else 0)
-                    # 尝试多种 npu-smi 命令格式
-                    for cmd in (
-                        ["npu-smi", "info", "-t", "usg", "-i", str(target_card)],
-                        ["npu-smi", "info", "-m"],
-                    ):
-                        try:
-                            r = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
-                            if r.returncode == 0 and r.stdout.strip():
-                                break
-                        except Exception:
-                            continue
-                    if r.returncode == 0:
-                        # 尝试从输出中提取使用率数字
-                        nums = re.findall(r"(\d+)\s*%?", r.stdout)
-                        if nums:
-                            # 通常第一个数字是 AI Core 利用率
-                            result["compute_util"] = float(nums[0])
-                    # 额外尝试采集多卡概览
+                # 所有在用卡的 ID 列表
+                dp_ids: list[int]
+                if hasattr(MNISTRunner, "_dp_device_ids"):
+                    dp_ids = list(MNISTRunner._dp_device_ids)
+                else:
+                    idx = int(device.index if device.index is not None else 0)
+                    dp_ids = [idx]
+
+                total_mem_mb = 0.0
+                allocated_mb = 0.0
+                for idx in dp_ids:
                     try:
-                        r2 = subprocess.run(
-                            ["npu-smi", "info", "-t", "usg", "-i", "-1"],
-                            capture_output=True, text=True, timeout=2,
-                        )
-                        if r2.returncode == 0:
-                            cards: list[dict] = []
-                            for line in r2.stdout.splitlines():
-                                m = re.match(r"\s*(\d+)\s+(\d+)", line)
-                                if m:
-                                    cards.append({"id": int(m.group(1)), "usage": int(m.group(2))})
-                            if cards:
-                                result["cards"] = cards
+                        allocated_mb += torch.npu.memory_allocated(idx) / 1024 / 1024
+                        total_mem_mb += torch.npu.get_device_properties(idx).total_memory / 1024 / 1024
                     except Exception:
                         pass
+                if total_mem_mb > 0:
+                    result["memory_util"] = round(allocated_mb / total_mem_mb * 100, 1)
+                    result["memory_allocated_mb"] = round(allocated_mb, 1)
+                    result["memory_total_mb"] = round(total_mem_mb, 1)
+
+                # npu-smi info -m 获取各卡 AI Core 使用率
+                try:
+                    import re
+                    r = subprocess.run(
+                        ["npu-smi", "info", "-m"],
+                        capture_output=True, text=True, timeout=4,
+                    )
+                    if r.returncode == 0 and r.stdout.strip():
+                        # 解析表格行：每个 NPU 行包含 NPU ID 和 AI Core(%)
+                        cards: list[dict] = []
+                        total_core_util = 0.0
+                        for line in r.stdout.splitlines():
+                            # 匹配 "| 0" 或 "0" 开头后跟数字的行
+                            m = re.match(r"\s*\|?\s*(\d+)\s+\|.*?\|\s*(\d+)\s*\|", line)
+                            if not m:
+                                m = re.match(r"\s*(\d+)\s+(\d+)(?:\s|$)", line)
+                            if m:
+                                card_id = int(m.group(1))
+                                # 最后一列为 AI Core 使用率（需要确认列位置）
+                                # 尝试从行尾提取数字
+                                nums = re.findall(r"(\d+)", line)
+                                if len(nums) >= 2:
+                                    # 尝试多种列位置：最后的数字可能是内存，倒数第二个可能是算力
+                                    # 简单策略：取所有数字中看起来像百分比的
+                                    core_vals = [int(n) for n in nums[1:] if 0 <= int(n) <= 100]
+                                    usage = core_vals[-1] if core_vals else int(nums[-1])
+                                    cards.append({"id": card_id, "usage": usage})
+                                    total_core_util += usage
+                        if cards:
+                            result["cards"] = cards
+                            result["compute_util"] = round(total_core_util / len(cards), 1)
                 except Exception:
                     pass
 
@@ -653,10 +660,17 @@ class MNISTRunner:
             yield {"type": "error", "message": f"模型构建失败: {str(e)}。设备={device}"}
             return
 
-        # ── 发送实际使用的卡信息（SSE + 日志）──
+        # ── 记录多卡 ID 供 _sample_device_utilization 使用 ──
         if num_devices > 1:
             dp_ids = list(getattr(model, "device_ids", []))
-            card_ids = dp_ids if dp_ids else [getattr(device, "index", 0)]
+            MNISTRunner._dp_device_ids = dp_ids if dp_ids else [int(getattr(device, "index", 0))]
+        else:
+            idx = getattr(device, "index", None)
+            MNISTRunner._dp_device_ids = [int(idx)] if idx is not None else [0]
+
+        # ── 发送实际使用的卡信息（SSE + 日志）──
+        if num_devices > 1:
+            card_ids = MNISTRunner._dp_device_ids
             card_str = ", ".join(f"{device.type}:{i}" for i in card_ids)
             _train_log.info(f"多卡就绪: {num_devices} 卡 [{card_str}], bs={batch_size}")
             yield dict(type="device_info", device=str(device), selected=device.type,
@@ -705,6 +719,7 @@ class MNISTRunner:
                     "message": f"Epoch {epoch + 1}/{epochs} 训练中...",
                 }
                 model.train()
+                epoch_t0 = time.time()
                 train_loss, train_correct, train_total = 0.0, 0, 0
                 total_batches = len(train_loader)
                 last_progress_time = time.time()
@@ -748,6 +763,7 @@ class MNISTRunner:
                             f"data.device={data.device}, loss={loss.item():.4f}"
                         )
 
+                epoch_secs = time.time() - epoch_t0
                 train_loss_avg = train_loss / train_total
                 train_acc_avg = train_correct / train_total
 
@@ -776,6 +792,13 @@ class MNISTRunner:
                         k: v.cpu().clone() for k, v in model.state_dict().items()
                     }
 
+                _train_log.info(
+                    f"Epoch {epoch+1}/{epochs}: loss={train_loss_avg:.4f} "
+                    f"acc={train_acc_avg*100:.1f}% val_acc={val_acc_avg*100:.1f}% "
+                    f"time={epoch_secs:.1f}s bs={batch_size} "
+                    f"{f'imgs/s={train_total/epoch_secs:.0f}' if epoch_secs > 0 else ''}"
+                )
+
                 yield {
                     "type": "epoch_end", "epoch": epoch + 1, "total_epochs": epochs,
                     "train_loss": round(train_loss_avg, 4), "train_acc": round(train_acc_avg, 4),
@@ -785,11 +808,29 @@ class MNISTRunner:
                         f"train_acc={train_acc_avg*100:.1f}% val_acc={val_acc_avg*100:.1f}%"
                     ),
                 }
-                # 每 epoch 后采样真实设备使用率
+                # 每 epoch 后采样设备使用率 + 写入日志
                 dev_util = MNISTRunner._sample_device_utilization(device)
                 if dev_util:
-                    yield {"type": "device_util", "epoch": epoch + 1,
-                           "total_epochs": epochs, "device": str(device), **dev_util}
+                    # 仅当 compute_util > 0 或 memory_util > 0 时发送
+                    cu = dev_util.get("compute_util", 0)
+                    mu = dev_util.get("memory_util", 0)
+                    if cu > 0 or mu > 0:
+                        yield {"type": "device_util", "epoch": epoch + 1,
+                               "total_epochs": epochs, "device": str(device), **dev_util}
+                    # 每 epoch 记录各卡内存到文件
+                    cards = dev_util.get("cards", [])
+                    if cards:
+                        card_detail = ", ".join(f"npu:{c['id']}={c['usage']}%" for c in cards[:8])
+                        _train_log.info(
+                            f"Epoch {epoch+1}/{epochs} 设备状态: "
+                            f"memory={mu:.0f}% ({dev_util.get('memory_allocated_mb',0):.0f}/{dev_util.get('memory_total_mb',0):.0f}MB) "
+                            f"| {card_detail}"
+                        )
+                    else:
+                        _train_log.info(
+                            f"Epoch {epoch+1}/{epochs} 设备状态: "
+                            f"memory={mu:.0f}% ({dev_util.get('memory_allocated_mb',0):.0f}/{dev_util.get('memory_total_mb',0):.0f}MB)"
+                        )
 
         except Exception as e:
             _train_log.error(f"训练循环崩溃: {e}", exc_info=True)
@@ -889,13 +930,18 @@ class MNISTRunner:
             "message": f"识别演示: {sum(1 for s in demo_samples if s['correct'])}/{len(demo_samples)} 正确",
         }
 
-        # ── 保存用户训练模型（必须在 done 事件之前，因为 SSE 收到 done 后会退出循环）──
+        # ── 保存用户训练模型（必须在 done 事件之前）──
         session_id = config.get("session_id")
         if session_id and best_epoch > 0 and best_model_state:
+            # DataParallel 训练时 state_dict 的 key 带有 "module." 前缀，
+            # 保存时去掉前缀，确保加载到单卡模型时能正确匹配
+            clean_state = {}
+            for k, v in best_model_state.items():
+                clean_state[k.replace("module.", "", 1)] = v
             try:
                 from app.core.mnist.model_manager import ModelManager
                 ModelManager.get_instance().save_user_model(
-                    int(session_id), best_model_state, arch_config
+                    int(session_id), clean_state, arch_config
                 )
                 _train_log.info(f"用户模型已保存 session={session_id}")
             except Exception as e:

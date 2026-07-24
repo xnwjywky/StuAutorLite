@@ -13,7 +13,8 @@ cd backend
 pip install -r requirements.txt
 
 # MNIST 实验需要 PyTorch（可选，纯分类实验不需要）
-pip install torch torchvision numpy psutil
+# pip install torch torchvision numpy psutil
+pip install torch==2.4.0 torch_npu==2.4.0.post2 torchvision==0.19.0 numpy psutil
 
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
@@ -31,6 +32,11 @@ cd .. && python run_tests.py
 > 后端启动后会自动在后台线程中串行训练 MiniCNN/StandardCNN/DeepCNN 三个预训练模型（首次约需 5-15 分钟/模型），供 MNIST 上传识别使用。通过 `/api/mnist/model-status` 可查询训练进度。
 >
 > 局域网其他设备通过 `http://<本机IP>:5173` 访问；前端已配置 `host: "0.0.0.0"`。
+
+
+<!-- MNIST 模型很小（~400K 参数量），DataParallel 瓶颈不在计算而在通信——每个 batch 都要把模型复制到 8 张卡、前向后聚合梯度。模型越小，通信占比越大。对于大模型（如 ResNet-50），8 卡能接近线性加速；对于 MNIST，2-4 卡通常是最佳配置。
+
+如果需要提升 MNIST 训练速度，建议在 Stage2 设计实验时选择较小的架构（MiniCNN 32K） 或减少 epoch 数，比增加卡数更有效。 -->
 
 ## 实验任务
 

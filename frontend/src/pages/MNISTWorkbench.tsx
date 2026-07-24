@@ -528,28 +528,27 @@ function Stage3() {
               ))}
             </div>
           )}
-          {/* 设备使用率条（后端实时采样） */}
+          {/* 设备使用率条（仅当有真实数据时显示，若全为 0 则只显示卡信息） */}
           {device && (
             <div className="mb-3">
-              <div className="flex items-center gap-3 mb-1">
-                <span className="text-[10px] font-medium text-gray-500 uppercase w-12">{device.toUpperCase()}</span>
-                <div className="flex-1 bg-gray-200 rounded-full h-2">
-                  <div className="h-2 rounded-full bg-gradient-to-r from-blue-400 to-purple-500 transition-all duration-500"
-                    style={{ width: `${running || result ? deviceUtil : 0}%` }} />
-                </div>
-                <span className="text-[10px] text-gray-400 w-10 text-right">
-                  {running || result ? `${deviceUtil}%` : "—"}
-                </span>
-                {deviceUtilLabel && (
+              {/* 使用率条：只在 deviceUtil > 0 时展示 */}
+              {deviceUtil > 0 && (
+                <div className="flex items-center gap-3 mb-1">
+                  <span className="text-[10px] font-medium text-gray-500 uppercase w-12">{device.toUpperCase()}</span>
+                  <div className="flex-1 bg-gray-200 rounded-full h-2">
+                    <div className="h-2 rounded-full bg-gradient-to-r from-blue-400 to-purple-500 transition-all duration-500"
+                      style={{ width: `${deviceUtil}%` }} />
+                  </div>
+                  <span className="text-[10px] text-gray-400 w-10 text-right">{deviceUtil}%</span>
                   <span className="text-[9px] text-gray-300">
-                    {deviceUtilLabel === "compute" ? "算力" : "显存"}
+                    {deviceUtilLabel === "compute" ? "算力" : deviceUtilLabel === "memory" ? "显存" : ""}
                   </span>
-                )}
-                {numDevices > 1 && (
-                  <span className="text-[9px] text-purple-500 font-medium">{numDevices} 卡并行</span>
-                )}
-              </div>
-              {/* 多卡详情行 */}
+                  {numDevices > 1 && (
+                    <span className="text-[9px] text-purple-500 font-medium">{numDevices} 卡并行</span>
+                  )}
+                </div>
+              )}
+              {/* 多卡状态行（始终显示） */}
               {cardList.length > 0 && (
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 pl-14">
                   {cardList.map((c, i) => (
