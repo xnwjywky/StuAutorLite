@@ -223,6 +223,7 @@ def _pick_idle_cudas(max_devices: int = 8, busy_threshold: int = 15) -> list[int
 def _setup_multi_device(model, device, batch_size, train_ds, val_ds, test_ds):
     """统一多卡加速入口 — NPU / CUDA / MPS / CPU 均适配。
     返回 (wrapped_model, final_device, final_batch_size, train_loader, val_loader, test_loader, num_devices)。"""
+    import torch
     import torch.nn as nn
     from torch.utils.data import DataLoader
 
