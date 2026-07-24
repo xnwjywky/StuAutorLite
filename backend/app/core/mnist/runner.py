@@ -220,7 +220,18 @@ def _pick_idle_cudas(max_devices: int = 8, busy_threshold: int = 15) -> list[int
         return list(range(min(count, max_devices))) if count > 1 else [0]
 
 
-def _setup_multi_device(model, device, batch_size, train_ds, val_ds, test_ds):
+def _max_devices_for_model(param_count: int) -> int:
+    """根据模型参数量动态限制并行卡数。MNIST 模型太小，多卡通信开销 > 计算收益。"""
+    if param_count < 50000:   # MiniCNN 32K
+        return 2
+    if param_count < 200000:  # 小模型
+        return 4
+    if param_count < 600000:  # StandardCNN/MLP ~400-500K
+        return 4
+    return 8                   # DeepCNN 870K+
+
+
+def _setup_multi_device(model, device, batch_size, train_ds, val_ds, test_ds, param_count: int = 0):
     """统一多卡加速入口 — NPU / CUDA / MPS / CPU 均适配。
     返回 (wrapped_model, final_device, final_batch_size, train_loader, val_loader, test_loader, num_devices)。"""
     import torch
@@ -230,10 +241,12 @@ def _setup_multi_device(model, device, batch_size, train_ds, val_ds, test_ds):
     num_devices = 1
     device_ids: list[int] = []
 
+    # 根据模型大小限制卡数
+    max_cards = _max_devices_for_model(param_count)
     if device.type == "npu":
-        device_ids = _pick_idle_npus()
+        device_ids = _pick_idle_npus(max_devices=max_cards)
     elif device.type == "cuda":
-        device_ids = _pick_idle_cudas()
+        device_ids = _pick_idle_cudas(max_devices=max_cards)
 
     if len(device_ids) > 1:
         # ── 多卡 DataParallel ──
@@ -517,6 +530,9 @@ class MNISTRunner:
         try:
             import numpy as np
             import torch
+            # 抑制 NCCL 警告（NPU 使用 HCCL，NCCL 不可用属正常）
+            import warnings
+            warnings.filterwarnings("ignore", message=".*NCCL.*")
             # 在 NPU (Ascend) 系统上，必须先导入 torch_npu 注册后端，
             # 否则 torch.nn / torch.cuda 等子模块可能无法正常工作
             try:
@@ -654,6 +670,7 @@ class MNISTRunner:
             ) = _setup_multi_device(
                 model, device, batch_size,
                 train_dataset, val_dataset, test_dataset,
+                param_count=param_count,
             )
         except Exception as e:
             _train_log.error(f"模型构建/多卡加速失败: {e}", exc_info=True)
@@ -671,13 +688,12 @@ class MNISTRunner:
         # ── 发送实际使用的卡信息（SSE + 日志）──
         if num_devices > 1:
             card_ids = MNISTRunner._dp_device_ids
-            card_str = ", ".join(f"{device.type}:{i}" for i in card_ids)
-            _train_log.info(f"多卡就绪: {num_devices} 卡 [{card_str}], bs={batch_size}")
+            _train_log.info(f"多卡就绪: {num_devices} 卡 [{card_ids}], bs={batch_size}")
             yield dict(type="device_info", device=str(device), selected=device.type,
                        num_devices=num_devices, card_ids=card_ids,
                        card_list=[f"{device.type}:{i}" for i in card_ids],
                        batch_size=batch_size,
-                       messages=device_diag["messages"] + [f"已启用 {num_devices} 卡并行: {card_str}"],
+                       messages=device_diag["messages"],
                        detected=device_diag["detected"], usable=device_diag["usable"],
                        warnings=device_diag["warnings"])
         else:

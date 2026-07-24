@@ -436,8 +436,8 @@ function Stage3() {
               setDeviceUtil(0);
               setDeviceWarnings(event.warnings || []);
               setDeviceMessages(event.messages || []);
-              setCardList(event.card_list || []);
               setNumDevices(event.num_devices || 1);
+              // card_list 由 device_util 事件更新（含使用率），device_info 只设卡数
               break;
             case "device_util":
               // 真实设备使用率（后端采样）
@@ -528,30 +528,27 @@ function Stage3() {
               ))}
             </div>
           )}
-          {/* 设备使用率条（仅当有真实数据时显示，若全为 0 则只显示卡信息） */}
-          {device && (
+          {/* 设备使用率条（仅当有真实使用率数据时展示） */}
+          {device && deviceUtil > 0 && (
             <div className="mb-3">
-              {/* 使用率条：只在 deviceUtil > 0 时展示 */}
-              {deviceUtil > 0 && (
-                <div className="flex items-center gap-3 mb-1">
-                  <span className="text-[10px] font-medium text-gray-500 uppercase w-12">{device.toUpperCase()}</span>
-                  <div className="flex-1 bg-gray-200 rounded-full h-2">
-                    <div className="h-2 rounded-full bg-gradient-to-r from-blue-400 to-purple-500 transition-all duration-500"
-                      style={{ width: `${deviceUtil}%` }} />
-                  </div>
-                  <span className="text-[10px] text-gray-400 w-10 text-right">{deviceUtil}%</span>
-                  <span className="text-[9px] text-gray-300">
-                    {deviceUtilLabel === "compute" ? "算力" : deviceUtilLabel === "memory" ? "显存" : ""}
-                  </span>
-                  {numDevices > 1 && (
-                    <span className="text-[9px] text-purple-500 font-medium">{numDevices} 卡并行</span>
-                  )}
+              <div className="flex items-center gap-3 mb-1">
+                <span className="text-[10px] font-medium text-gray-500 uppercase w-12">{device.toUpperCase()}</span>
+                <div className="flex-1 bg-gray-200 rounded-full h-2">
+                  <div className="h-2 rounded-full bg-gradient-to-r from-blue-400 to-purple-500 transition-all duration-500"
+                    style={{ width: `${deviceUtil}%` }} />
                 </div>
-              )}
-              {/* 多卡状态行（始终显示） */}
-              {cardList.length > 0 && (
+                <span className="text-[10px] text-gray-400 w-10 text-right">{deviceUtil}%</span>
+                <span className="text-[9px] text-gray-300">
+                  {deviceUtilLabel === "compute" ? "算力" : deviceUtilLabel === "memory" ? "显存" : ""}
+                </span>
+                {numDevices > 1 && (
+                  <span className="text-[9px] text-purple-500 font-medium">{numDevices} 卡并行</span>
+                )}
+              </div>
+              {/* 多卡详情：仅在有实际使用率数据时展示 */}
+              {cardList.length > 0 && cardList.some(c => /\d+%/.test(c)) && (
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 pl-14">
-                  {cardList.map((c, i) => (
+                  {cardList.filter(c => /\d+%/.test(c)).map((c, i) => (
                     <span key={i} className="text-[10px] text-gray-400 font-mono">{c}</span>
                   ))}
                 </div>
