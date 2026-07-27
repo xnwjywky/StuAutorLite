@@ -9,6 +9,31 @@ from app.config import settings
 
 app = FastAPI(title=settings.app_name, debug=settings.debug)
 
+
+# ── 请求日志中间件（所有入站请求均记录到控制台 + app.log）──
+@app.middleware("http")
+async def log_requests(request, call_next):
+    import logging, time
+    _req_log = logging.getLogger("app.requests")
+    _req_log.setLevel(logging.DEBUG)
+    if not _req_log.handlers:
+        from pathlib import Path
+        _log_dir = Path(__file__).resolve().parent.parent / "logs"
+        _log_dir.mkdir(exist_ok=True)
+        _fh = logging.FileHandler(str(_log_dir / "app.log"), encoding="utf-8")
+        _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+        _req_log.addHandler(_fh)
+        _sh = logging.StreamHandler()
+        _sh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+        _req_log.addHandler(_sh)
+
+    t0 = time.time()
+    response = await call_next(request)
+    ms = round((time.time() - t0) * 1000)
+    _req_log.info(f"{request.method} {request.url.path} → {response.status_code} ({ms}ms)")
+    return response
+
+
 # CORS 中间件（开发阶段允许所有来源）
 app.add_middleware(
     CORSMiddleware,
@@ -96,16 +121,24 @@ def root():
 
 @app.get("/health")
 def health_check():
-    """健康检查 + 版本信息（用于确认后端是否已重新加载）"""
+    """健康检查 + 版本信息（用于确认后端是否已重新加载）— 直连端口 8000 访问"""
+    return _health_payload()
+
+
+@app.get("/api/health")
+def api_health_check():
+    """健康检查 — 通过 Vite /api 代理访问（/api 前缀已被 Vite 转发到后端）"""
+    return _health_payload()
+
+
+def _health_payload() -> dict:
     import sys
     from pathlib import Path
-    # 检查 RL 模块是否存在
     try:
         from app.api.routes.rl import RLRunRequest  # noqa: F401
         rl_ok = True
     except Exception:
         rl_ok = False
-    # 检查 MNIST model_manager 是否含 get_all_model_info
     try:
         from app.core.mnist.model_manager import ModelManager
         mnist_ok = hasattr(ModelManager, "get_all_model_info")
@@ -114,7 +147,7 @@ def health_check():
 
     return {
         "status": "ok",
-        "version": "2026-07-22-rl",
+        "version": "2026-07-24-rl",
         "python": sys.executable,
         "cwd": str(Path.cwd()),
         "modules": {"rl": rl_ok, "mnist_model_manager": mnist_ok},

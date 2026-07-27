@@ -1,5 +1,5 @@
 /** API service — 封装所有后端 API 调用 */
-import apiClient, { createAgentClient } from "./client";
+import apiClient, { createAgentClient, detectBaseUrl } from "./client";
 import { getConfigForAgent } from "../stores/agentConfigStore";
 import type {
   ResearchSession, ResearchQuestion, Hypothesis,
@@ -268,7 +268,7 @@ export async function runImageRecogStream(
   onEvent: (event: any) => void,
   onError: (err: Error) => void,
 ): Promise<void> {
-  const baseUrl = import.meta.env.VITE_API_BASE_URL || "";
+  const baseUrl = detectBaseUrl();
   try {
     const resp = await fetch(`${baseUrl}/api/imagerecog/run-stream`, {
       method: "POST",

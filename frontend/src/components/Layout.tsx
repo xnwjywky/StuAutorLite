@@ -1,4 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
+import { useBackendHealth } from "../hooks/useBackendHealth";
 
 const NAV_ITEMS = [
   { path: "/", label: "发现" },
@@ -12,6 +13,7 @@ interface LayoutProps {
 
 export default function Layout({ children }: LayoutProps) {
   const { pathname } = useLocation();
+  const { online, checking, lastError, detectedUrl, retryNow } = useBackendHealth();
   const isActive = (path: string) =>
     path === "/"
       ? pathname === "/"
@@ -61,6 +63,32 @@ export default function Layout({ children }: LayoutProps) {
           </Link>
         </div>
       </header>
+
+      {/* 后端不可用横幅 */}
+      {!online && !checking && (
+        <div className="sticky top-14 z-40 bg-red-50 border-b border-red-200">
+          <div className="max-w-6xl mx-auto px-4 py-2 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2 text-sm text-red-700 min-w-0">
+              <span className="inline-block w-2 h-2 rounded-full bg-red-500 animate-pulse shrink-0" />
+              <span className="font-medium shrink-0">后端服务不可用</span>
+              <span className="text-red-500 text-xs truncate hidden sm:inline">
+                {lastError || "无法连接到后端 API"}
+              </span>
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              {detectedUrl && (
+                <span className="text-[10px] text-gray-400 hidden md:inline">{detectedUrl}</span>
+              )}
+              <button
+                onClick={retryNow}
+                className="text-xs px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded-full font-medium transition-colors"
+              >
+                重试
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main>{children}</main>
     </div>

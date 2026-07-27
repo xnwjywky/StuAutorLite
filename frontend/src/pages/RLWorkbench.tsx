@@ -11,6 +11,7 @@ import ChartPanel from "../components/ChartPanel";
 import RLGridVisualizer from "../components/RLGridVisualizer";
 import { useRLStore } from "../stores/rlStore";
 import { callMentor, callDataAnalyst, hasAgentConfig, logAgentError } from "../api/service";
+import { detectBaseUrl } from "../api/client";
 import { archiveSession } from "./Archive";
 import { renderMarkdown } from "../utils/markdown";
 import type { ResearchStage } from "../types";
@@ -207,7 +208,7 @@ function Stage3() {
   const execRun = async () => {
     setRunning(true); setRunError(null);
     try {
-      const baseUrl = import.meta.env.VITE_API_BASE_URL || "";
+      const baseUrl = detectBaseUrl();
       const resp = await fetch(`${baseUrl}/api/rl/run`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

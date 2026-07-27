@@ -58,15 +58,16 @@ cd .. && python run_tests.py
 - **4 种网络架构**：MiniCNN (32K) / StandardCNN (422K) / DeepCNN (871K) / MLP (536K)
 - **超参数可调**：学习率、批次大小、训练轮数、优化器(SGD/Adam/RMSprop)、Momentum、Dropout
 - **设备自动检测**：系统层探针 (nvidia-smi/npu-smi/dev/davinci) + PyTorch 层匹配，CUDA > MPS > NPU > CPU
-- **SSE 流式训练**：epoch 级实时推送 loss/accuracy 曲线、设备使用率
+- **多卡并行训练**：自动检测空闲 NPU/CUDA 卡 → `nn.DataParallel`，按模型参数量动态限制卡数（MiniCNN=2, StandardCNN=4, DeepCNN=8）
+- **SSE 流式训练**：epoch 级实时推送 loss/accuracy 曲线、batch 级进度、设备使用率
 - **上传图片识别**：下拉选择模型（3 个预训练 + 1 个用户训练），上传手写数字图片进行识别
 
 ## 强化学习格子世界
 
-- **2 种 RL 算法**：Q-learning (off-policy) / SARSA (on-policy)
-- **可调参数**：地图大小 (6-10)、陷阱数量 (1-5)、训练局数 (200-1000)、学习率 α、折扣因子 γ、探索率 ε
-- **可视化**：Canvas 网格动画，机器人路径步进播放
-- **对比实验**：同地图公平对比算法性能
+- **2 种 RL 算法**：Q-learning (off-policy) / SARSA (on-policy)，ε-greedy 探索 + ε-退火
+- **可调参数**：地图大小 (6-10)、陷阱数量 (1-5)、训练局数 (500-2000)、学习率 α、折扣因子 γ、探索率 ε
+- **可视化**：Canvas 草地机器人找金币动画，栅栏/深坑/金币/🤖 emoji 图标，路径步进播放
+- **对比实验**：同地图公平对比算法性能，侧栏折叠扩宽显示
 
 ## AI Agent
 
@@ -116,13 +117,14 @@ cd .. && python run_tests.py
 │   │   └── services/          # AgentGateway / ReportGenerator
 │   ├── data/
 │   │   └── models/            # 预训练模型缓存 (.pth)
-│   ├── logs/                  # agent_errors.log + mnist_errors.log
-│   └── tests/                 # pytest
+│   ├── logs/                  # app.log, mnist_errors.log, rl_errors.log, agent_errors.log
+│   └── tests/                 # pytest (含 test_rl.py 15 用例)
 ├── frontend/
 │   └── src/
 │       ├── pages/             # 10 个核心页面
-│       ├── components/        # 共享组件
-│       └── stores/            # 8 个 Zustand Store
+│       ├── components/        # 13 个共享组件
+│       ├── stores/            # 9 个 Zustand Store
+│       └── utils/             # 工具函数 (format + markdown 渲染)
 └── run_tests.py               # 一键测试运行器
 ```
 

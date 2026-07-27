@@ -45,33 +45,35 @@ const DIFFICULTY_STYLE: Record<TaskCard["difficulty"], string> = {
 
 // ═══════════════════════════════════════════════════════════
 
+/** 将 taskId 映射到工作台路由 */
+function getRoute(taskId: string, sid: string | number): string {
+  const r: Record<string, string> = {
+    simple_classification: `/workbench-classify/${sid}`,
+    guess_number:          `/workbench-guess/${sid}`,
+    visual_algo_compare:   `/workbench-sort/${sid}`,
+    shape_recognition:     `/workbench-shape/${sid}`,
+    digit_recognition:     `/workbench-digits/${sid}`,
+    image_recognition:     `/workbench-imagerecog/${sid}`,
+    robot_obstacle:        `/workbench-rl/${sid}`,
+  };
+  return r[taskId] || `/workbench/${sid}`;
+}
+
 export default function TaskSelect() {
   const navigate = useNavigate();
   const [starting, setStarting] = useState<string | null>(null);
 
   const handleStart = async (taskId: string) => {
+    // 立即跳转（使用临时 sessionId），不等待后端创建会话
+    // 避免后端不可用时浏览器白等 8 秒才响应
+    navigate(getRoute(taskId, `demo-${Date.now()}`));
+
+    // 后台异步创建真实会话（静默）
     setStarting(taskId);
     try {
-      const session = await createSession(taskId);
-      const sid = typeof session.id === "number" ? session.id : (session as any).session_id;
-      const route = taskId === "simple_classification"
-        ? `/workbench-classify/${sid}`
-        : taskId === "guess_number"
-        ? `/workbench-guess/${sid}`
-        : taskId === "visual_algo_compare"
-        ? `/workbench-sort/${sid}`
-        : taskId === "shape_recognition"
-        ? `/workbench-shape/${sid}`
-        : taskId === "digit_recognition"
-        ? `/workbench-digits/${sid}`
-        : taskId === "image_recognition"
-        ? `/workbench-imagerecog/${sid}`
-        : taskId === "robot_obstacle"
-        ? `/workbench-rl/${sid}`
-        : `/workbench/${sid}`;
-      navigate(route);
+      await createSession(taskId);
     } catch {
-      navigate(`/workbench/demo-${Date.now()}`);
+      // 后端不可用 → 使用 demo session，各阶段仍可正常操作
     } finally {
       setStarting(null);
     }

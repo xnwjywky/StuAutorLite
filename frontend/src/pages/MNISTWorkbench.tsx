@@ -11,6 +11,7 @@ import StageContainer from "../components/StageContainer";
 import TrainingCurve from "../components/TrainingCurve";
 import { useMNISTStore, computeConfigFingerprint } from "../stores/mnistStore";
 import { saveQuestion, saveAnalysis, callMentor, callDataAnalyst, hasAgentConfig, logAgentError } from "../api/service";
+import { detectBaseUrl } from "../api/client";
 import { archiveSession } from "./Archive";
 import { renderMarkdown } from "../utils/markdown";
 import type { ResearchStage } from "../types";
@@ -159,7 +160,7 @@ export default function MNISTWorkbench() {
     return () => {
       const id = Number(sessionId);
       if (Number.isNaN(id)) return;
-      const baseUrl = import.meta.env.VITE_API_BASE_URL || "";
+      const baseUrl = detectBaseUrl();
       fetch(`${baseUrl}/api/mnist/user-model?session_id=${id}`, { method: "DELETE" })
         .catch(() => {});
     };
@@ -393,7 +394,7 @@ function Stage3() {
     const ac = new AbortController();
     abortRef.current = ac;
     try {
-      const baseUrl = import.meta.env.VITE_API_BASE_URL || "";
+      const baseUrl = detectBaseUrl();
       const body = { session_id: store.sessionId!, architecture: { id: store.selectedArchitecture }, hyperparameters: { learning_rate: hp.learningRate, batch_size: hp.batchSize, epochs: hp.epochs, optimizer: hp.optimizer, momentum: hp.momentum, dropout: hp.dropout }, max_test_samples: store.maxTestSamples };
 
       let resp: Response;
@@ -628,7 +629,7 @@ function UploadInfer() {
   const [inferError, setInferError] = useState<string | null>(null);
   const inferAbortRef = useRef<AbortController | null>(null);
 
-  const baseUrl = import.meta.env.VITE_API_BASE_URL || "";
+  const baseUrl = detectBaseUrl();
   const inferResult = store.uploadInference;
 
   // ── 挂载时：轮询模型状态（预训练由后端 on_startup 触发）──
