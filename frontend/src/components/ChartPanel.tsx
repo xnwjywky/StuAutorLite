@@ -24,7 +24,7 @@ export default function ChartPanel({ data: rawData, xKey = "algorithm", singleMe
           <BarChart data={data} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
             <XAxis dataKey={xKey} tick={{ fontSize: 11 }} />
-            <YAxis tick={{ fontSize: 10 }} />
+            <YAxis tick={{ fontSize: 10 }} type="number" domain={[(dataMin: number) => Math.min(0, dataMin), (dataMax: number) => Math.max(0, dataMax)]} />
             <Tooltip />
             <Bar dataKey={singleMetric.key} name={singleMetric.label} fill="#3b82f6" radius={[3, 3, 0, 0]}>
               {data.map((_: any, i: number) => (
@@ -50,7 +50,7 @@ export default function ChartPanel({ data: rawData, xKey = "algorithm", singleMe
         <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
           <XAxis dataKey={xKey} />
-          <YAxis />
+          <YAxis type="number" domain={[(dataMin: number) => Math.min(0, dataMin), (dataMax: number) => Math.max(0, dataMax)]} />
           <Tooltip />
           {BARS.map((bar) => <Bar key={bar.key} dataKey={bar.key} name={bar.name} fill={bar.color} />)}
         </BarChart>

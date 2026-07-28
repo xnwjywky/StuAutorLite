@@ -2,13 +2,13 @@
  * 强化学习格子世界研究工作台 — 5 阶段（设计文档 §4.4）
  * 流程: 选择任务 → 设计实验 → 运行实验 → 分析结果 → 总结报告
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import Layout from "../components/Layout";
 import FlowStepper from "../components/FlowStepper";
 import StageContainer from "../components/StageContainer";
 import ChartPanel from "../components/ChartPanel";
-import RLGridVisualizer from "../components/RLGridVisualizer";
+import RLGridVisualizer, { ComparePath } from "../components/RLGridVisualizer";
 import { useRLStore } from "../stores/rlStore";
 import { callMentor, callDataAnalyst, hasAgentConfig, logAgentError } from "../api/service";
 import { detectBaseUrl } from "../api/client";
@@ -226,15 +226,22 @@ function Stage3() {
   useEffect(() => { if (!store.experimentResult) execRun(); }, []);
 
   const result = store.experimentResult;
+  // Filter runs by selected trial — works because batch /api/rl/run tags each run with trial 1..N
   const displayRuns = result?.runs ? result.runs.filter((r: any) => r.trial === store.selectedTrial) : [];
   const nameOf = (a: string) => AGENT_LIST.find(x => x.key === a)?.name || a;
+
+  // Build dual-path overlay from current trial's runs
+  const comparePaths: ComparePath[] = displayRuns.map((r: any) => ({ agent: r.agent, path: r.test_path || [] }));
+  const world = displayRuns[0]?.world;
 
   return (
     <StageContainer step={3} title="运行实验" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("EXPERIMENT_DESIGNED")}>← 上一步</button><button className="btn-primary" onClick={() => store.setStage("RESULT_ANALYZED")} disabled={!result}>查看结果 → 分析</button></div>}>
       <div className="card">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div><h2 className="font-semibold">实验配置</h2><p className="text-sm text-gray-400">{store.selectedAgents.map(nameOf).join("、")} | {store.gridSize}×{store.gridSize} | {store.numTraps}陷阱 | {store.numEpisodes}局 | α={store.learningRate} γ={store.discount} ε={store.epsilon} | ×{store.numTrials}</p></div>
-          <button className="btn-primary text-lg px-6" onClick={execRun} disabled={running}>{running ? "⏳ 训练中..." : result ? "🔄 重新运行" : "▶ 开始实验"}</button>
+          <div className="flex gap-2">
+            <button className="btn-primary text-lg px-6" onClick={execRun} disabled={running}>{running ? "⏳ 训练中..." : result ? "🔄 重新运行" : "▶ 开始实验"}</button>
+          </div>
         </div>
         {result && store.numTrials > 1 && (
           <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
@@ -250,26 +257,18 @@ function Stage3() {
         <div className="bg-red-50 border border-red-200 rounded-lg p-4"><p className="text-sm font-medium text-red-700 mb-1">运行失败</p><pre className="text-xs text-red-600 whitespace-pre-wrap">{runError}</pre></div>
       )}
 
-      {/* 格子可视化 */}
+      {/* ── 测试路径：双路径叠加 + 决策动画面板 ── */}
       {displayRuns.length > 0 && (
-        <div className="card overflow-x-auto">
-          <h3 className="font-semibold text-gray-700 mb-3 text-sm">第 {store.selectedTrial} 组 — 测试路径</h3>
-          <div className="grid grid-cols-2 gap-4" style={{ minWidth: 800 }}>
-            {displayRuns.map((r: any) => (
-              <div key={r.agent} className="flex flex-col items-center min-w-0">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="font-semibold text-sm">{nameOf(r.agent)}</span>
-                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${r.test_success ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>{r.test_success ? "✅ 成功" : "❌ 失败"}</span>
-                </div>
-                <RLGridVisualizer world={r.world} path={r.test_path || []} />
-                <div className="text-xs text-gray-400 mt-1">奖励: {r.test_reward} · 成功率: {(r.success_rate * 100).toFixed(0)}% · {r.runtime_ms}ms</div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <DualPathPanel
+          world={world}
+          comparePaths={comparePaths}
+          runs={displayRuns}
+          trial={store.selectedTrial}
+          nameOf={nameOf}
+        />
       )}
 
-      {/* 汇总图表 */}
+      {/* ── 汇总图表 ── */}
       {result && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <ChartPanel data={Object.entries(result.summary).map(([a, s]: any) => ({ agent: a, v: +(s.avg_success_rate * 100).toFixed(1) }))} singleMetric={{ key: "v", label: "成功率 (%)" }} xKey="agent" />
@@ -277,6 +276,165 @@ function Stage3() {
         </div>
       )}
     </StageContainer>
+  );
+}
+
+// ═════════════════════════════════════════════════
+// 双路径面板：叠加轨迹动画 + 每步决策 Q 值详情
+// ═════════════════════════════════════════════════
+
+const ACTION_LABELS = ["←", "→", "↑", "↓"];
+const AGENT_STYLES: Record<string, { bg: string; text: string; border: string }> = {
+  Q_LEARNING: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-300" },
+  SARSA: { bg: "bg-green-50", text: "text-green-700", border: "border-green-300" },
+};
+
+function DualPathPanel({ world, comparePaths, runs, trial, nameOf }: {
+  world: any;
+  comparePaths: ComparePath[];
+  runs: any[];
+  trial: number;
+  nameOf: (a: string) => string;
+}) {
+  const maxSteps = comparePaths.length > 0
+    ? Math.min(...comparePaths.map(cp => cp.path.length - 1))
+    : 0;
+
+  const [animStep, setAnimStep] = useState(0);
+  const [playing, setPlaying] = useState(true);
+  const [speed, setSpeed] = useState(1);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Reset on trial/data change
+  const dataKey = `${trial}-${comparePaths.map(c => c.path.length).join(",")}`;
+  const dataKeyRef = useRef(dataKey);
+  useEffect(() => {
+    if (dataKeyRef.current !== dataKey) { dataKeyRef.current = dataKey; setAnimStep(0); setPlaying(true); }
+  }, [dataKey]);
+
+  // Animation timer
+  useEffect(() => {
+    if (playing && maxSteps > 0) {
+      const ms = Math.round(500 / speed);
+      timerRef.current = setInterval(() => {
+        setAnimStep(prev => {
+          if (prev >= maxSteps) { setPlaying(false); return prev; }
+          return prev + 1;
+        });
+      }, ms);
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [playing, speed, maxSteps]);
+
+  const togglePlay = () => {
+    if (animStep >= maxSteps) setAnimStep(0);
+    setPlaying(p => !p);
+  };
+
+  // Collect per-step decisions for current step from each agent's test_decisions
+  const curDecisions = runs.map((r: any) => {
+    const decs = r.test_decisions || [];
+    const d = decs[Math.min(animStep, decs.length - 1)];
+    return d ? { agent: r.agent, ...d } : null;
+  }).filter(Boolean);
+
+  return (
+    <div className="card overflow-x-auto">
+      <h3 className="font-semibold text-gray-700 mb-1 text-sm">第 {trial} 组 — 测试路径</h3>
+      <p className="text-xs text-gray-400 mb-3">
+        Q-learning (蓝色实线) vs SARSA (绿色虚线)，从同一起点出发，逐步展示每步决策。
+      </p>
+
+      <div className="flex gap-4 flex-wrap items-start">
+        {/* ── 双路径叠加 Canvas ── */}
+        <RLGridVisualizer world={world} comparePaths={comparePaths} animatedStep={animStep} hideLegend />
+
+        {/* ── 控制 + 决策面板 ── */}
+        <div className="flex-1 min-w-[240px] max-w-sm">
+          {/* 播放控制 */}
+          <div className="flex items-center gap-2 mb-3">
+            <button onClick={togglePlay} className="px-3 py-1.5 rounded-full text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 min-w-[56px]">
+              {playing ? "⏸ 暂停" : "▶ 播放"}
+            </button>
+            <button onClick={() => { setPlaying(false); setAnimStep(0); }} className="px-2.5 py-1.5 rounded-full text-xs border border-gray-200 bg-white text-gray-500 hover:bg-gray-50">
+              ⏮ 重置
+            </button>
+            <select value={speed} onChange={e => setSpeed(Number(e.target.value))}
+              className="text-xs border border-gray-200 rounded-full px-2 py-1 bg-white">
+              <option value={0.5}>0.5x</option>
+              <option value={1}>1x</option>
+              <option value={2}>2x</option>
+            </select>
+          </div>
+
+          {/* 步数滑块 */}
+          <div className="mb-3">
+            <input type="range" min={0} max={maxSteps} value={animStep}
+              onChange={e => { setPlaying(false); setAnimStep(Number(e.target.value)); }}
+              className="w-full h-1.5 accent-blue-600" />
+            <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
+              <span>Step {animStep}/{maxSteps}</span>
+              <span>{animStep === maxSteps ? "✅ 完成" : ""}</span>
+            </div>
+          </div>
+
+          {/* ── 每步决策详情 + 原因解释 ── */}
+          {curDecisions.length > 0 && (
+            <div className="space-y-2">
+              <span className="text-[10px] font-medium text-gray-500">第 {animStep + 1} 步决策</span>
+              {curDecisions.map((d: any) => {
+                const style = AGENT_STYLES[d.agent] || AGENT_STYLES.Q_LEARNING;
+                const allQs = d.q_values || [];
+                const bestIdx = d.best_action ?? 0;
+                const chosenIdx = d.action ?? 0;
+                const maxAbsQ = allQs.length > 0 ? Math.max(...allQs.map((v: number) => Math.abs(v))) : 1;
+                return (
+                  <div key={d.agent} className={`border rounded-lg p-2.5 ${style.bg} ${style.border}`}>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className={`text-xs font-semibold ${style.text}`}>{nameOf(d.agent)}</span>
+                      <span className="text-[10px] text-gray-500">
+                        ({d.state?.[0]},{d.state?.[1]}) → <b>{ACTION_LABELS[chosenIdx]}</b>
+                      </span>
+                    </div>
+                    {/* Q 值条 */}
+                    <div className="space-y-0.5">
+                      {allQs.map((v: number, i: number) => (
+                        <div key={i} className="flex items-center gap-1.5 text-[10px]">
+                          <span className={`w-4 text-right font-mono ${i === bestIdx ? "font-bold" : "text-gray-400"}`}>
+                            {ACTION_LABELS[i]}
+                          </span>
+                          <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${i === bestIdx ? (d.agent === "Q_LEARNING" ? "bg-blue-500" : "bg-green-500") : "bg-gray-400"}`}
+                              style={{ width: `${maxAbsQ > 0 ? Math.max(3, Math.abs(v) / maxAbsQ * 100) : 0}%` }}
+                            />
+                          </div>
+                          <span className={`w-11 text-right font-mono ${i === bestIdx ? "font-bold " + style.text : "text-gray-400"}`}>
+                            {v >= 0 ? "+" : ""}{v.toFixed(1)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* 结果摘要 */}
+          <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-2 gap-2">
+            {runs.map((r: any) => (
+              <div key={r.agent} className="text-center text-[10px]">
+                <span className="font-semibold">{nameOf(r.agent)}</span>
+                <span className="text-gray-400 ml-1">
+                  {r.test_success ? "✅" : "❌"} {r.test_reward} 奖励 · {Math.round(r.runtime_ms)}ms
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 

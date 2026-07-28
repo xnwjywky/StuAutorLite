@@ -147,3 +147,97 @@ class TestRLRunner:
             assert s["count"] == 3
             assert -10 <= s["avg_reward"] <= 10
             assert 0 <= s["avg_success_rate"] <= 1
+
+
+class TestEvalCompare:
+    """eval_compare 轨迹对比 + 策略快照"""
+
+    def test_returns_all_keys(self):
+        runner = RLRunner()
+        result = runner.run_eval_compare({
+            "agents": ["Q_LEARNING", "SARSA"], "grid_size": 6, "num_traps": 2,
+            "num_episodes": 100, "learning_rate": 0.1, "discount": 0.9,
+            "epsilon": 0.1, "seed": 42,
+        })
+        for key in ("status", "world", "compare_paths", "compare_decisions",
+                     "q_snapshots", "train_rewards", "train_success",
+                     "summary", "grid_size", "num_episodes"):
+            assert key in result, f"Missing key: {key}"
+        assert result["status"] == "COMPLETED"
+
+    def test_compare_decisions_structure(self):
+        """验证每步决策包含 Q 值详情。"""
+        runner = RLRunner()
+        result = runner.run_eval_compare({
+            "agents": ["Q_LEARNING"], "grid_size": 6, "num_traps": 2,
+            "num_episodes": 100, "seed": 42,
+        })
+        decs = result["compare_decisions"]["Q_LEARNING"]
+        assert len(decs) > 0
+        for d in decs:
+            assert "step" in d
+            assert "state" in d
+            assert "action" in d
+            assert "q_values" in d
+            assert "best_action" in d
+            assert len(d["q_values"]) == 4
+            assert 0 <= d["action"] <= 3
+
+    def test_compare_paths_both_agents(self):
+        runner = RLRunner()
+        result = runner.run_eval_compare({
+            "agents": ["Q_LEARNING", "SARSA"], "grid_size": 6, "num_traps": 2,
+            "num_episodes": 100, "seed": 42,
+        })
+        for agent in ("Q_LEARNING", "SARSA"):
+            assert agent in result["compare_paths"]
+            path = result["compare_paths"][agent]
+            assert len(path) >= 1
+            assert all(len(p) == 2 for p in path)
+
+    def test_q_snapshots_structure(self):
+        runner = RLRunner()
+        result = runner.run_eval_compare({
+            "agents": ["Q_LEARNING", "SARSA"], "grid_size": 6, "num_traps": 2,
+            "num_episodes": 200, "seed": 42,
+        })
+        snaps = result["q_snapshots"]
+        assert len(snaps) > 0, "Should have at least one snapshot"
+        for snap in snaps:
+            assert "episode" in snap
+            assert "agent" in snap
+            assert "cells" in snap
+            assert "epsilon" in snap
+            cells = snap["cells"]
+            assert len(cells) == result["grid_size"]
+            for row in cells:
+                assert len(row) == result["grid_size"]
+                for cell in row:
+                    assert "best_action" in cell
+                    assert "max_q" in cell
+                    assert "q_values" in cell
+                    assert 0 <= cell["best_action"] <= 3
+                    assert len(cell["q_values"]) == 4
+
+    def test_same_world_shared(self):
+        """两个 agent 共享同一地图（同 seed 生成相同 world）。"""
+        runner = RLRunner()
+        result = runner.run_eval_compare({
+            "agents": ["Q_LEARNING", "SARSA"], "grid_size": 6, "num_traps": 2,
+            "num_episodes": 50, "seed": 42,
+        })
+        world = result["world"]
+        assert world["size"] == 6
+        assert len(world["traps"]) == 2
+
+    def test_epsilon_zero_eval(self):
+        """eval 阶段 ε=0，确保纯贪婪路径无探索噪声。"""
+        runner = RLRunner()
+        result = runner.run_eval_compare({
+            "agents": ["Q_LEARNING"], "grid_size": 6, "num_traps": 2,
+            "num_episodes": 100, "seed": 42,
+        })
+        # 检查快照中最后的 epsilon 接近 0
+        snaps = result["q_snapshots"]
+        last_snap = snaps[-1]
+        assert last_snap["epsilon"] < 0.12  # 训练末段 ε 已衰减

@@ -85,6 +85,41 @@ def run_rl_experiment(req: RLRunRequest, db: DbSession = Depends(get_db)):
     }
 
 
+@router.post("/eval-compare")
+def eval_compare(req: RLRunRequest):
+    """轨迹对比 + 策略演变：同地图训练两个 agent，返回叠加路径和 Q 表快照。
+
+    额外返回:
+      - compare_paths: {Q_LEARNING: [[x,y],...], SARSA: [[x,y],...]}
+      - q_snapshots: [{episode, agent, cells: [[{best_action, max_q, q_values}]]}]
+      - train_rewards / train_success: {Q_LEARNING: [...], SARSA: [...]}
+    """
+    agents = req.agents
+    settings = req.settings
+
+    config = {
+        "agents": agents,
+        "grid_size": max(4, min(settings.get("grid_size", 8), 12)),
+        "num_traps": max(0, min(settings.get("num_traps", 3), 8)),
+        "num_episodes": max(100, min(settings.get("num_episodes", 2000), 5000)),
+        "learning_rate": settings.get("learning_rate", 0.1),
+        "discount": settings.get("discount", 0.9),
+        "epsilon": settings.get("epsilon", 0.1),
+        "seed": settings.get("seed", 42),
+    }
+
+    _rl_log.info("RL eval-compare: session=%d agents=%s settings=%s",
+                 req.session_id, req.agents, req.settings)
+
+    try:
+        result = runner.run_eval_compare(config)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"RL 轨迹对比失败: {str(e)}")
+
+    result["session_id"] = req.session_id
+    return result
+
+
 @router.get("/runs")
 def list_rl_runs(session_id: int | None = None, db: DbSession = Depends(get_db)):
     q = db.query(RLRun)

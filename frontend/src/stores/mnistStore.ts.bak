@@ -90,7 +90,7 @@ export const useMNISTStore = create<MNISTWorkflowData & {
   ...defaults(),
   init: (id, taskId = "mnist_cnn") => {
     // 只在 sessionId 变化或首次初始化时重置状态，避免重复 init 覆盖已有进度
-    if (get().sessionId === id) { set({ experimentResult: null, uploadInference: null, trainingCurve: [], currentEpoch: 0, totalEpochs: 0, isTraining: false, resultFingerprint: "", aiAnalysis: null, trainingCompletedAt: 0 }); return; }
+    if (get().sessionId === id) return;
     set({ ...defaults(), sessionId: id, taskId });
   },
   setStage: (s) => set({ currentStage: s }),

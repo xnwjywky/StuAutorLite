@@ -14,7 +14,7 @@ describe("rlStore", () => {
     expect(s.selectedAgents).toEqual(["Q_LEARNING", "SARSA"]);
     expect(s.gridSize).toBe(8);
     expect(s.numTraps).toBe(3);
-    expect(s.numEpisodes).toBe(500);
+    expect(s.numEpisodes).toBe(2000);
     expect(s.learningRate).toBe(0.1);
     expect(s.discount).toBe(0.9);
     expect(s.epsilon).toBe(0.1);

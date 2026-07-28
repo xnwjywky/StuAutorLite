@@ -1,5 +1,5 @@
 /**
- * 字符串搜索可视化 — 长文本分段显示 + 模式串滑动比对
+ * 字符串搜索可视化 — 长文本分段显示 + 模式串固定参考条
  */
 import { useRef, useEffect, useState } from "react";
 
@@ -24,14 +24,22 @@ export default function StringSearchVisualizer({ steps = [] }: Props) {
   const w = Math.max(360, textW);
   const h = (textRows + 2) * ROW_H + pad * 2 + 30;
 
+  // Find the first "found" step index
+  const firstFoundIdx = steps.findIndex(s => s.type === "found");
+  const stopFrame = firstFoundIdx >= 0 ? firstFoundIdx + 1 : steps.length;
+
   useEffect(() => {
     if (steps.length === 0) { setDone(true); return; }
     setFrame(0); setDone(false);
     const interval = setInterval(() => {
-      setFrame((prev) => { if (prev >= steps.length) { clearInterval(interval); setDone(true); return steps.length; } return prev + 1; });
+      setFrame((prev) => {
+        const next = prev + 1;
+        if (next >= stopFrame) { clearInterval(interval); setDone(true); return stopFrame; }
+        return next;
+      });
     }, 30);
     return () => clearInterval(interval);
-  }, [steps.length, replayKey]);
+  }, [steps.length, replayKey, stopFrame]);
 
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
@@ -39,12 +47,17 @@ export default function StringSearchVisualizer({ steps = [] }: Props) {
     canvas.width = w; canvas.height = h;
     ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h);
 
-    const step = steps.length > 0 ? steps[Math.min(frame - 1, steps.length - 1)] : null;
+    const stepIdx = Math.min(frame - 1, steps.length - 1);
+    const step = steps.length > 0 && stepIdx >= 0 ? steps[stepIdx] : null;
     const curI = step?.i ?? 0;
-    const foundPositions = new Set<number>();
-    for (let f = 0; f < Math.min(frame, steps.length); f++) if (steps[f].type === "found") foundPositions.add(steps[f].i);
 
-    // 每行绘制文本（分段）
+    // Collect all found positions up to current frame
+    const foundPositions = new Set<number>();
+    for (let f = 0; f < Math.min(frame, steps.length); f++) {
+      if (steps[f].type === "found") foundPositions.add(steps[f].i);
+    }
+
+    // ── Draw text rows ──
     ctx.font = "bold 13px monospace";
     for (let row = 0; row < textRows; row++) {
       const start = row * CHARS_PER_ROW;
@@ -54,43 +67,46 @@ export default function StringSearchVisualizer({ steps = [] }: Props) {
         const x = pad + 10 + col * CHAR_W;
         const y = 6 + row * ROW_H;
         let bg = COLORS.textBg;
-        if (foundPositions.has(idx)) bg = COLORS.found;
-        else if (step && step.type !== "found" && idx >= curI && idx < curI + pattern.length) bg = COLORS.active;
-        else if (step && step.type === "found" && idx >= step.i && idx < step.i + pattern.length) bg = COLORS.found;
-        ctx.fillStyle = bg; ctx.fillRect(x, y, CHAR_W, ROW_H - 1);
+        if (foundPositions.has(idx)) {
+          bg = COLORS.found;
+        } else if (step && curI >= 0 && idx >= curI && idx < curI + pattern.length) {
+          if (step.j !== undefined && idx === curI + step.j) {
+            bg = step.match === true ? COLORS.match : COLORS.mismatch;
+          } else {
+            bg = COLORS.active;
+          }
+        }
+        ctx.fillStyle = bg;
+        ctx.fillRect(x, y, CHAR_W, ROW_H - 1);
         ctx.fillStyle = foundPositions.has(idx) ? "#fff" : "#374151";
         ctx.fillText(text[idx], x + 1, y + ROW_H - 4);
       }
     }
 
-    // 模式串滑动条
-    if (step && step.type !== "found" && curI >= 0) {
-      const patternCol = curI % CHARS_PER_ROW;
-      const px = pad + 10 + patternCol * CHAR_W;
-      const py = 6 + (textRows + 1) * ROW_H;
-      ctx.font = "bold 13px monospace";
-      for (let j = 0; j < pattern.length; j++) {
-        const x = px + j * CHAR_W;
-        let bg = COLORS.active;
-        if (step.j !== undefined && j === step.j) bg = step.match || step.match === undefined ? COLORS.match : COLORS.mismatch;
-        ctx.fillStyle = bg; ctx.fillRect(x, py, CHAR_W, ROW_H - 1);
-        ctx.fillStyle = "#374151";
-        ctx.fillText(pattern[j], x + 1, py + ROW_H - 4);
-      }
+    // ── Static pattern reference bar at bottom ──
+    const barY = 6 + (textRows + 1) * ROW_H + 2;
+    const px = pad + 10;
+    ctx.font = "bold 13px monospace";
+    for (let j = 0; j < pattern.length; j++) {
+      const x = px + j * CHAR_W;
+      ctx.fillStyle = COLORS.textBg;
+      ctx.fillRect(x, barY, CHAR_W, ROW_H - 1);
+      ctx.fillStyle = "#9ca3af";
+      ctx.fillText(pattern[j], x + 1, barY + ROW_H - 4);
     }
 
-    // 统计
+    // Step counter
     ctx.font = "10px sans-serif"; ctx.textAlign = "right";
     ctx.fillStyle = "#6b7280";
-    ctx.fillText(`${Math.min(frame, steps.length)}/${steps.length} 步`, w - pad, h - 4);
+    ctx.fillText(`${Math.min(frame, stopFrame)}/${stopFrame}`, w - pad, h - 4);
     if (foundPositions.size > 0) {
       ctx.textAlign = "left";
-      ctx.fillText(`找到 ${foundPositions.size} 处匹配`, pad + 10, h - 4);
+      ctx.fillText(`✅ 匹配位置: ${[...foundPositions].sort((a, b) => a - b).join(", ")}`, pad + 10, h - 4);
     }
-  }, [frame, steps, text, pattern, textRows, w, h]);
+  }, [frame, steps, text, pattern, textRows, w, h, stopFrame]);
 
   const handleReplay = () => setReplayKey(v => v + 1);
-  const progress = steps.length > 0 ? Math.round(frame / steps.length * 100) : 0;
+  const progress = stopFrame > 0 ? Math.round(frame / stopFrame * 100) : 0;
 
   return (
     <div className="flex flex-col items-center gap-2">

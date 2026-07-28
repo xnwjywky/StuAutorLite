@@ -17,7 +17,9 @@ def naive_search(text: str, pattern: str) -> dict:
             steps.append({"type": "compare", "i": i, "j": j, "match": text[i + j] == pattern[j], "text": text, "pattern": pattern})
             if text[i + j] != pattern[j]:
                 match = False; break
-        if match: matches.append(i)
+        if match:
+            matches.append(i)
+            steps.append({"type": "found", "i": i, "text": text, "pattern": pattern})
         steps.append({"type": "shift", "i": i, "text": text, "pattern": pattern})
     return {"success": True, "matches": matches, "comparisons": comps, "steps": steps}
 
@@ -43,7 +45,7 @@ def kmp_search(text: str, pattern: str) -> dict:
     for i in range(n):
         while q > 0 and pattern[q] != text[i]:
             comps += 1
-            steps.append({"type": "mismatch", "i": i, "q": q, "pi": pi[q-1], "text": text, "pattern": pattern})
+            steps.append({"type": "mismatch", "i": i, "q": q, "pi": pi[q-1], "match": False, "text": text, "pattern": pattern})
             q = pi[q - 1]
         if pattern[q] == text[i]:
             comps += 1
@@ -81,7 +83,7 @@ def boyer_moore_search(text: str, pattern: str) -> dict:
             i += 1
         else:
             comps += 1
-            steps.append({"type": "mismatch_r", "i": i, "j": j, "text": text, "pattern": pattern})
+            steps.append({"type": "mismatch_r", "i": i, "j": j, "match": False, "text": text, "pattern": pattern})
             bc = bad_char.get(text[i + j], -1)
             shift = max(1, j - bc)
             steps.append({"type": "shift", "i": i, "by": shift, "text": text, "pattern": pattern})

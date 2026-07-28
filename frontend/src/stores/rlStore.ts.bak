@@ -1,4 +1,4 @@
-/** RL gridworld experiment state */
+/** 强化学习格子世界实验状态 */
 import { create } from "zustand";
 import type { ResearchStage } from "../types";
 
@@ -10,6 +10,7 @@ export interface RLWorkflowData {
   rawQuestion: string; refinedQuestion: string; suggestedQuestions: string[];
   hypothesis: string;
 
+  // 实验参数
   selectedAgents: string[];
   gridSize: number;
   numTraps: number;
@@ -26,6 +27,7 @@ export interface RLWorkflowData {
   } | null;
   selectedTrial: number;
 
+  /** 轨迹对比数据 (eval-compare 端点返回) */
   evalCompare: {
     world: any;
     compare_paths: Record<string, [number, number][]>;
@@ -61,18 +63,9 @@ export const useRLStore = create<RLWorkflowData & {
   setStage: (s: ResearchStage) => void;
   set: (p: Partial<RLWorkflowData>) => void;
   reset: () => void;
-}>((set, get) => ({
+}>((set) => ({
   ...defaults(),
-  init: (id, taskId = "rl_gridworld") => {
-    // Always clear volatile results on entry; keep research question if same session
-    const prev = get();
-    set({
-      ...defaults(), sessionId: id, taskId,
-      // Preserve research question and hypothesis across re-renders of same session
-      rawQuestion: id === prev.sessionId ? prev.rawQuestion : "",
-      refinedQuestion: id === prev.sessionId ? prev.refinedQuestion : "",
-    });
-  },
+  init: (id, taskId = "rl_gridworld") => set({ ...defaults(), sessionId: id, taskId }),
   setStage: (s) => set({ currentStage: s }),
   set: (p) => set(p), reset: () => set(defaults()),
 }));

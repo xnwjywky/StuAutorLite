@@ -9,6 +9,7 @@ import Layout from "../components/Layout";
 import FlowStepper from "../components/FlowStepper";
 import StageContainer from "../components/StageContainer";
 import TrainingCurve from "../components/TrainingCurve";
+import MNISTDrawCanvas from "../components/MNISTDrawCanvas";
 import { useMNISTStore, computeConfigFingerprint } from "../stores/mnistStore";
 import { saveQuestion, saveAnalysis, callMentor, callDataAnalyst, hasAgentConfig, logAgentError } from "../api/service";
 import { detectBaseUrl } from "../api/client";
@@ -597,20 +598,18 @@ function Stage3() {
       {/* ── 识别演示 ── */}
       {recogDemo && <RecogDemo samples={recogDemo.samples} accuracy={recogDemo.accuracy} />}
 
-      {/* ── 上传手写数字图片识别 ── */}
-      <UploadInfer />
+      {/* ── 手写画板识别 ── */}
+      <DrawInfer />
     </StageContainer>
   );
 }
 
-/** 上传手写数字图片 + 下拉选择模型 + 开始/停止识别 */
-function UploadInfer() {
+/** 手写画板 + 下拉选择模型 + 开始/停止识别 */
+function DrawInfer() {
   const store = useMNISTStore();
 
-  // ── 上传状态 ──
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string>("");
-  const fileRef = useRef<HTMLInputElement>(null);
+  // ── 画板输出 ──
+  const [imageBlob, setImageBlob] = useState<Blob | null>(null);
 
   // ── 模型选择 ──
   interface ModelOption {
@@ -622,7 +621,7 @@ function UploadInfer() {
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [loadingModels, setLoadingModels] = useState(true);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const autoSelectedRef = useRef(false);       // 首次自动选中后置 true，防止轮询覆盖用户选择
+  const autoSelectedRef = useRef(false);
 
   // ── 识别状态 ──
   const [inferring, setInferring] = useState(false);
@@ -632,7 +631,7 @@ function UploadInfer() {
   const baseUrl = detectBaseUrl();
   const inferResult = store.uploadInference;
 
-  // ── 挂载时：轮询模型状态（预训练由后端 on_startup 触发）──
+  // ── 轮询模型状态 ──
   useEffect(() => {
     const fetchModels = () => {
       const sid = store.sessionId ?? undefined;
@@ -643,26 +642,19 @@ function UploadInfer() {
           const ml: ModelOption[] = data.models || [];
           setModels(ml);
           setLoadingModels(false);
-          // 首次自动选中第一个就绪模型（仅一次，之后由用户手动选择）
           if (!autoSelectedRef.current) {
             const firstReady = ml.find(m => m.selectable);
-            if (firstReady) {
-              setSelectedModel(firstReady.id);
-              autoSelectedRef.current = true;
-            }
+            if (firstReady) { setSelectedModel(firstReady.id); autoSelectedRef.current = true; }
           }
         })
         .catch(() => setLoadingModels(false));
     };
-
-    // 立即查询 + 之后每 2 秒轮询
     fetchModels();
     pollingRef.current = setInterval(fetchModels, 2000);
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
+    return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
   }, [store.sessionId]);
-  // 训练完成后立即刷新列表 + 自动选中用户模型
+
+  // 训练完成后刷新列表 + 自动选中用户模型
   useEffect(() => {
     if (!store.trainingCompletedAt) return;
     const sid = store.sessionId ?? undefined;
@@ -678,24 +670,15 @@ function UploadInfer() {
       .catch(() => {});
   }, [store.trainingCompletedAt]);
 
-  // ── 文件处理 ──
-  const handleFile = (f: File | null) => {
-    if (!f || inferring) return;
-    setFile(f); setInferError(null);
-    const reader = new FileReader();
-    reader.onload = () => setPreview(reader.result as string);
-    reader.readAsDataURL(f);
-  };
-
   // ── 识别 ──
   const doInfer = async () => {
-    if (!file || !store.sessionId || !selectedModel) return;
+    if (!imageBlob || !store.sessionId || !selectedModel) return;
     setInferring(true); setInferError(null);
     const ac = new AbortController();
     inferAbortRef.current = ac;
     try {
       const form = new FormData();
-      form.append("file", file);
+      form.append("file", imageBlob, "draw.png");
       form.append("session_id", String(store.sessionId));
       form.append("model_id", selectedModel);
       const resp = await fetch(`${baseUrl}/api/mnist/infer`, {
@@ -711,7 +694,7 @@ function UploadInfer() {
       const data = await resp.json();
       store.set({
         uploadInference: {
-          fileName: file.name,
+          fileName: "手写画板",
           modelId: data.model_id || selectedModel,
           modelName: data.model_name || selectedModel,
           predicted: data.predicted,
@@ -746,76 +729,39 @@ function UploadInfer() {
 
   return (
     <div className="card">
-      <h2 className="font-semibold text-gray-700 mb-3">📤 上传手写数字图片识别</h2>
+      <h2 className="font-semibold text-gray-700 mb-3">✏️ 手写数字识别</h2>
 
-      {/* ── 模型选择下拉框 ── */}
+      {/* ── 模型选择 ── */}
       <div className="mb-3">
         <label className="text-xs font-medium text-gray-500 mb-1.5 block">选择识别模型</label>
-        <div className="relative">
-          <select
-            className="w-full p-2.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:opacity-50 disabled:cursor-not-allowed"
-            value={selectedModel}
-            onChange={e => setSelectedModel(e.target.value)}
-            disabled={inferring || models.length === 0}
-          >
-            {loadingModels && <option value="">加载模型状态中...</option>}
-            {!loadingModels && models.length === 0 && <option value="">未检测到可用模型</option>}
-            {models.map(m => {
-              const st = statusLabel(m);
-              return (
-                <option key={m.id} value={m.id} disabled={!m.selectable}>
-                  {m.name} ({m.params}参数) — {st.text}
-                </option>
-              );
-            })}
-          </select>
-        </div>
-        {/* 选中模型详情 */}
+        <select
+          className="w-full p-2.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:opacity-50"
+          value={selectedModel}
+          onChange={e => setSelectedModel(e.target.value)}
+          disabled={inferring || models.length === 0}
+        >
+          {loadingModels && <option value="">加载模型状态中...</option>}
+          {!loadingModels && models.length === 0 && <option value="">未检测到可用模型</option>}
+          {models.map(m => {
+            const st = statusLabel(m);
+            return <option key={m.id} value={m.id} disabled={!m.selectable}>{m.name} ({m.params}参数) — {st.text}</option>;
+          })}
+        </select>
         {selModelInfo && (
           <div className="mt-1.5 flex items-center gap-3 text-[11px] text-gray-400">
             <span>{selModelInfo.description}</span>
             <span className={statusLabel(selModelInfo).cls}>{statusLabel(selModelInfo).text}</span>
-            {selModelInfo.status === "training" && (
-              <div className="flex items-center gap-1">
-                <div className="w-2.5 h-2.5 border border-amber-400 border-t-transparent rounded-full animate-spin" />
-                <span className="text-amber-600">后台训练中…</span>
-              </div>
-            )}
           </div>
         )}
       </div>
 
-      {/* ── 上传区 ── */}
-      <div
-        className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors mb-3 ${
-          inferring
-            ? "border-gray-200 bg-gray-50 cursor-not-allowed"
-            : "border-gray-300 cursor-pointer hover:border-blue-400 hover:bg-blue-50/30"
-        }`}
-        onClick={() => { if (!inferring) fileRef.current?.click(); }}
-        onDragOver={e => e.preventDefault()}
-        onDrop={e => { e.preventDefault(); if (!inferring) handleFile(e.dataTransfer.files?.[0] ?? null); }}
-      >
-        <input ref={fileRef} type="file" accept="image/*" className="hidden"
-          onChange={e => handleFile(e.target.files?.[0] ?? null)} disabled={inferring} />
-        {preview ? (
-          <div className="flex justify-center">
-            <img src={preview} alt="预览" className="max-h-32 rounded-lg border border-gray-200" />
-          </div>
-        ) : (
-          <p className="text-sm text-gray-400">点击或拖拽上传手写数字图片</p>
-        )}
-      </div>
-      {file && <p className="text-[10px] text-gray-400 mb-3 text-center">{file.name} ({Math.round(file.size / 1024)} KB)</p>}
+      {/* ── 画板 (识别中 disabled) ── */}
+      <MNISTDrawCanvas disabled={inferring} onImageReady={setImageBlob} />
 
-      {/* ── 开始/停止识别按钮 ── */}
-      <div className="mb-3">
+      {/* ── 识别按钮 ── */}
+      <div className="mt-3">
         {!inferring ? (
-          <button
-            className="btn-primary w-full"
-            disabled={!file || !selectedModel || !selModelInfo?.selectable}
-            onClick={doInfer}
-          >
+          <button className="btn-primary w-full" disabled={!imageBlob || !selectedModel || !selModelInfo?.selectable} onClick={doInfer}>
             🔍 开始识别
           </button>
         ) : (
@@ -827,20 +773,17 @@ function UploadInfer() {
 
       {/* ── 错误 ── */}
       {inferError && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 mt-3">
           <p className="text-xs text-red-700">{inferError}</p>
         </div>
       )}
 
       {/* ── 识别结果 ── */}
       {inferResult && (
-        <div className="bg-green-50 border border-green-100 rounded-xl p-4 text-center">
-          <p className="text-[10px] text-gray-500 mb-1">
-            {inferResult.modelName} · {inferResult.fileName}
-          </p>
+        <div className="bg-green-50 border border-green-100 rounded-xl p-4 text-center mt-3">
+          <p className="text-[10px] text-gray-500 mb-1">{inferResult.modelName} · {inferResult.fileName}</p>
           <p className="text-5xl font-bold text-green-700 mb-1">{inferResult.predicted}</p>
           <p className="text-xs text-green-500">置信度 {inferResult.confidence}%</p>
-          {/* 各类别概率条 */}
           <div className="mt-3 grid grid-cols-10 gap-1">
             {inferResult.probabilities.map((p, i) => (
               <div key={i} className="text-center">

@@ -88,16 +88,15 @@ class GridWorld:
             self.traps.append((x, y))
             self.grid[y][x] = "T"
 
-        # 放置障碍物
+        # 放置障碍物（排除关键格子：起点、金币、陷阱）
         for x in range(self.size):
             for y in range(self.size):
                 if self.grid[y][x] == "." and self.rng.random() < self.obstacle_ratio:
                     if (x, y) not in (self.start, self.gold) and (x, y) not in self.traps:
                         self.grid[y][x] = "#"
 
-        # 确保连通性：BFS 从起点出发能到达金币
-        if not self._reachable():
-            self._carve_path()
+        # 确保连通性：如果不可达，沿 BFS 最短路径清除障碍物
+        self._ensure_reachable()
 
     def _reachable(self) -> bool:
         """BFS 连通性检查（避免循环导入，内联实现）。"""
@@ -122,10 +121,36 @@ class GridWorld:
                     q.append((nx, ny))
         return False
 
-    def _carve_path(self):
-        """不连通时随机打通一些墙。"""
-        for _ in range(self.size * 2):
-            x = self.rng.randint(0, self.size - 1)
-            y = self.rng.randint(0, self.size - 1)
-            if self.grid[y][x] == "#":
-                self.grid[y][x] = "."
+    def _ensure_reachable(self):
+        """如果不可达，沿 BFS 最短路径逐段清除障碍物直到连通。"""
+        if self._reachable():
+            return
+        # BFS 找一条路径（允许穿过障碍物），然后清除路径上的墙
+        from collections import deque
+        parent: dict[tuple[int, int], tuple[int, int] | None] = {self.start: None}
+        q = deque([self.start])
+        found = None
+        while q:
+            cx, cy = q.popleft()
+            if (cx, cy) == self.gold:
+                found = (cx, cy)
+                break
+            for dx, dy, _ in self.ACTIONS:
+                nx, ny = cx + dx, cy + dy
+                if 0 <= nx < self.size and 0 <= ny < self.size and (nx, ny) not in parent:
+                    parent[(nx, ny)] = (cx, cy)
+                    q.append((nx, ny))
+        if found is None:
+            # 极端情况：完全无路，清除起点到金币间的所有障碍
+            for x in range(min(self.start[0], self.gold[0]), max(self.start[0], self.gold[0]) + 1):
+                for y in range(min(self.start[1], self.gold[1]), max(self.start[1], self.gold[1]) + 1):
+                    if self.grid[y][x] == "#":
+                        self.grid[y][x] = "."
+            return
+        # 回溯路径，清除上面的墙
+        cur = found
+        while cur is not None and cur != self.start:
+            cx, cy = cur
+            if self.grid[cy][cx] == "#":
+                self.grid[cy][cx] = "."
+            cur = parent[cur]

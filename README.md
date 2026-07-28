@@ -60,14 +60,15 @@ cd .. && python run_tests.py
 - **设备自动检测**：系统层探针 (nvidia-smi/npu-smi/dev/davinci) + PyTorch 层匹配，CUDA > MPS > NPU > CPU
 - **多卡并行训练**：自动检测空闲 NPU/CUDA 卡 → `nn.DataParallel`，按模型参数量动态限制卡数（MiniCNN=2, StandardCNN=4, DeepCNN=8）
 - **SSE 流式训练**：epoch 级实时推送 loss/accuracy 曲线、batch 级进度、设备使用率
-- **上传图片识别**：下拉选择模型（3 个预训练 + 1 个用户训练），上传手写数字图片进行识别
+- **手写画板识别**：在线画板直接写数字 → 下拉选择模型（3 预训练 + 1 用户训练），开始识别后画板锁定，识别完成可重新编辑
 
 ## 强化学习格子世界
 
 - **2 种 RL 算法**：Q-learning (off-policy) / SARSA (on-policy)，ε-greedy 探索 + ε-退火
 - **可调参数**：地图大小 (6-10)、陷阱数量 (1-5)、训练局数 (500-2000)、学习率 α、折扣因子 γ、探索率 ε
 - **可视化**：Canvas 草地机器人找金币动画，栅栏/深坑/金币/🤖 emoji 图标，路径步进播放
-- **对比实验**：同地图公平对比算法性能，侧栏折叠扩宽显示
+- **轨迹对比**：评估模式 (ε=0) 下两 Agent 同起点出发，在同一格子上叠加绘制路径（Q-learning 蓝色实线 vs SARSA 绿色虚线）
+- **策略演变**：训练中保存 Q 表快照，热力图 + 箭头时间轴展示策略从探索到收敛的完整演变过程
 
 ## AI Agent
 
@@ -122,7 +123,7 @@ cd .. && python run_tests.py
 ├── frontend/
 │   └── src/
 │       ├── pages/             # 10 个核心页面
-│       ├── components/        # 13 个共享组件
+│       ├── components/        # 15 个共享组件（含 MNISTDrawCanvas, PolicyEvolution）
 │       ├── stores/            # 9 个 Zustand Store
 │       └── utils/             # 工具函数 (format + markdown 渲染)
 └── run_tests.py               # 一键测试运行器
