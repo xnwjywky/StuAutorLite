@@ -151,7 +151,6 @@ function Stage1() {
             <div className="space-y-1">{store.suggestedQuestions.map((q, i) => <button key={i} onClick={() => store.set({ refinedQuestion: q, rawQuestion: q })} className={`w-full text-left px-3 py-2 rounded-lg text-sm ${selectedQ === q ? "bg-gray-900 text-white font-medium" : "bg-white text-gray-700 hover:bg-gray-100 border"}`}>{q}</button>)}</div></div>)}
       </div>
       {selectedQ && (<>
-        <div className="card border-blue-200 bg-blue-50/50"><h3 className="font-semibold text-sm text-gray-700 mb-2">你的研究问题</h3><p className="text-sm text-gray-800 font-medium">{selectedQ}</p></div>
         {flowItems && (<div className="card border-green-100 bg-green-50/30"><h3 className="font-semibold text-sm text-gray-700 mb-3">📋 研究流程预览</h3><div className="space-y-2">{flowItems.map((item, i) => (<div key={i} className="flex gap-3 text-xs"><span className="w-24 text-gray-400 shrink-0">{item.stage}</span><span className="text-gray-600">{item.output}</span></div>))}</div></div>)}
         <div className="flex justify-end"><button className="btn-primary" onClick={() => store.setStage("EXPERIMENT_DESIGNED")}>确认 → 设计实验</button></div>
       </>)}
@@ -268,12 +267,9 @@ function Stage3() {
         />
       )}
 
-      {/* ── 汇总图表 ── */}
-      {result && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <ChartPanel data={Object.entries(result.summary).map(([a, s]: any) => ({ agent: a, v: +(s.avg_success_rate * 100).toFixed(1) }))} singleMetric={{ key: "v", label: "成功率 (%)" }} xKey="agent" />
-          <ChartPanel data={Object.entries(result.summary).map(([a, s]: any) => ({ agent: a, v: s.avg_reward }))} singleMetric={{ key: "v", label: "平均奖励" }} xKey="agent" />
-        </div>
+      {/* ── 公式说明 + 训练结果解读 ── */}
+      {result && displayRuns.length > 0 && (
+        <RLExplanation alpha={store.learningRate} gamma={store.discount} epsilon={store.epsilon} />
       )}
     </StageContainer>
   );
@@ -438,6 +434,40 @@ function DualPathPanel({ world, comparePaths, runs, trial, nameOf }: {
   );
 }
 
+// ═════════════════════════════════════════════════
+// 训练结果解释 + 奖励计算公式
+// ═════════════════════════════════════════════════
+
+function RLExplanation({ alpha, gamma, epsilon }: {
+  alpha: number; gamma: number; epsilon: number;
+}) {
+  return (
+    <div className="space-y-4">
+      {/* ── Q-learning vs SARSA 公式对比 ── */}
+      <div className="card border-purple-100 bg-purple-50/20">
+        <h3 className="font-semibold text-gray-700 mb-2 text-sm">🔢 Q-learning vs SARSA — 更新规则差异</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+          <div className="bg-white rounded-lg p-3 border border-blue-100">
+            <p className="font-bold text-blue-700 mb-1">Q-learning (Off-policy)</p>
+            <p className="font-mono text-gray-600 mb-1">Q(s,a) ← Q(s,a) + α·[ r + γ·<span className="text-blue-600 font-bold">max Q(s',a')</span> − Q(s,a) ]</p>
+            <p className="text-gray-400 mt-1">更新用<span className="font-semibold text-blue-600">最优未来动作的 Q 值</span>计算目标，假设下一步一定选最优动作，不考虑探索时的随机选择。因此更<span className="font-semibold text-blue-600">激进</span>，敢于贴边走捷径。</p>
+          </div>
+          <div className="bg-white rounded-lg p-3 border border-green-100">
+            <p className="font-bold text-green-700 mb-1">SARSA (On-policy)</p>
+            <p className="font-mono text-gray-600 mb-1">Q(s,a) ← Q(s,a) + α·[ r + γ·<span className="text-green-600 font-bold">Q(s',a')</span> − Q(s,a) ]</p>
+            <p className="text-gray-400 mt-1">更新用<span className="font-semibold text-green-600">实际选取的下一步动作的 Q 值</span>计算目标，考虑到探索中的随机选择可能带来的风险。因此更<span className="font-semibold text-green-600">保守</span>，会主动绕开陷阱。</p>
+          </div>
+        </div>
+        <div className="mt-2 bg-white rounded-lg p-2 text-[11px] text-gray-500 grid grid-cols-3 gap-2 text-center">
+          <div><span className="block text-gray-400">当前参数</span><b>α={alpha}</b> <span className="text-gray-300">学习率</span></div>
+          <div><span className="block text-gray-400">当前参数</span><b>γ={gamma}</b> <span className="text-gray-300">折扣因子</span></div>
+          <div><span className="block text-gray-400">当前参数</span><b>ε={epsilon}</b> <span className="text-gray-300">探索率</span></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ═══════ Stage4 ═══════
 function Stage4() {
   const store = useRLStore();
@@ -459,6 +489,47 @@ function Stage4() {
       )}
       <div className="flex items-center justify-between"><span className="text-sm text-gray-400">让 AI 帮你分析</span><button className="btn-secondary" onClick={handleAnalyze} disabled={analyzing}>{analyzing ? "分析中..." : "AI 分析"}</button></div>
       {store.aiAnalysis && (<div className="card border-blue-100 bg-blue-50/30"><p className="font-medium text-gray-800 mb-3">📊 {store.aiAnalysis.summary}</p>{store.aiAnalysis.key_findings?.length > 0 && <ul className="mb-3 space-y-0.5">{store.aiAnalysis.key_findings.map((f: string, i: number) => <li key={i} className="text-sm text-gray-600">• {f}</li>)}</ul>}<div className="border-t border-blue-100 pt-3"><p className="text-sm font-medium text-gray-700 mb-1">思考</p>{store.aiAnalysis.questions_for_student?.map((q: string, i: number) => <p key={i} className="text-sm text-gray-500">{i + 1}. {q}</p>)}</div></div>)}
+      {/* ── 本次训练结果解读 ── */}
+      {store.experimentResult && (() => {
+        const rlRuns = (store.experimentResult.runs || []).filter((r: any) => r.trial === store.selectedTrial);
+        if (rlRuns.length === 0) return null;
+        const nameOf = (a: string) => AGENT_LIST.find(x => x.key === a)?.name || a;
+        return (
+          <div className="card">
+            <h3 className="font-semibold text-gray-700 mb-2 text-sm">📊 本次训练结果解读</h3>
+            <p className="text-xs text-gray-500 mb-2">
+              在 {store.gridSize}×{store.gridSize} 地图中训练 {store.numEpisodes} 局，共 {store.numTraps} 个陷阱。
+            </p>
+            <div className="space-y-2 text-xs">
+              {rlRuns.map((r: any) => {
+                const isQL = r.agent === "Q_LEARNING";
+                const succRate = (r.success_rate * 100).toFixed(0);
+                const avgR = r.avg_reward;
+                return (
+                  <div key={r.agent} className={`rounded-lg p-3 border ${isQL ? "border-blue-100 bg-blue-50/20" : "border-green-100 bg-green-50/20"}`}>
+                    <p className="font-semibold mb-1" style={{ color: isQL ? "#1565c0" : "#2e7d32" }}>
+                      {nameOf(r.agent)}：{r.test_success ? "✅ 成功到达金币" : "❌ 未到达金币"}
+                      <span className="ml-2 font-normal text-gray-400">（{succRate}% 成功率 · 均奖励 {avgR} · {r.runtime_ms}ms）</span>
+                    </p>
+                    <p className="text-gray-500">
+                      {isQL
+                        ? `Q-learning 用 max Q(s',a') 更新，假设最优未来。在 ε 衰减后，它倾向于选择 Q 值最高的方向——即使旁边有陷阱也敢于贴边走捷径（因为"最优假设"忽略了探索风险）。${succRate}% 的成功率说明它${Number(succRate) > 80 ? "在大多数情况能避开陷阱" : "有时会因为激进策略掉入陷阱"}。`
+                        : `SARSA 用实际动作的 Q(s',a') 更新，把探索中选到坏动作的风险也算进去了。所以在陷阱附近，SARSA 的 Q 值更新会"记住"掉坑的教训，主动绕行。${succRate}% 的成功率说明它${Number(succRate) > 80 ? "的保守策略有效避开了陷阱" : "即使保守也未能完全避开（可能需要更多训练或调整参数）"}。`
+                      }
+                    </p>
+                    <p className="text-gray-400 mt-1">
+                      {isQL
+                        ? avgR > 0 ? `平均奖励为正（${avgR}），说明大多数 episode 成功到达金币拿到 +10 奖励。` : `平均奖励为负（${avgR}），说明探索阶段频繁掉陷阱（-10）拉低了整体回报。`
+                        : avgR > 0 ? `平均奖励为正（${avgR}），保守策略虽然路径较长但稳定获取金币。` : `平均奖励为负（${avgR}），在复杂环境中即使是保守策略也需要更多训练才能稳定。`
+                      }
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
       <div className="card"><h2 className="font-semibold text-gray-700 mb-3">你的分析</h2><textarea className="w-full min-h-[100px] p-3 border rounded-lg text-sm resize-y" placeholder="写下发现..." value={store.studentAnalysis} onChange={e => store.set({ studentAnalysis: e.target.value })} /></div>
     </StageContainer>
   );

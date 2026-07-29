@@ -2,11 +2,17 @@
  * 科研能力画像
  *
  * 7 维度评分：问题提出 / 假设能力 / 实验设计 / 算法理解 / 数据分析 / 反思能力 / 表达能力
- * 每完成一次研究会话，根据学生输入、Agent 评分、实验设计质量等自动更新
+ * 每次完成研究会话后根据档案数据重新计算：
+ * - 统计已完成的会话数、各 task 类型数、Review 平均分等
+ * - 各维度分数 = 基础分（会话数）+ Review 加权 + task 多样性加权
+ * - 总分不超过上限 5，档案越多分数越接近真实水平
  */
-import { useState } from "react";
+import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import Layout from "../components/Layout";
+import { loadArchives } from "./Archive";
+
+const CAP = 5;
 
 const DIMENSIONS = [
   { key: "question",   label: "问题提出", desc: "能否提出清楚问题",          hint: "是否能说清研究对象和比较目标" },
@@ -19,15 +25,56 @@ const DIMENSIONS = [
 ] as const;
 
 const STORAGE_KEY = "stuautor_profile";
+const TASK_LABELS: Record<string, string> = {
+  maze: "迷宫寻路", classify: "图像分类", guess: "猜数字", sort: "排序算法",
+  stringsearch: "字符串搜索", imagerecog: "图像识别", mnist_cnn: "MNIST CNN", rl_gridworld: "强化学习",
+};
 
-function loadScores(): Record<string, number> {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return {};
+/** 从所有档案重新计算画像分数（每次进入页面或完成会话时调用） */
+function computeScoresFromArchives(): Record<string, number> {
+  const archives = loadArchives();
+  const n = archives.length;
+  if (n === 0) return {};
+
+  // 收集统计
+  const taskSet = new Set(archives.map(a => a.taskId));
+  const avgReview = archives.reduce((sum, a) => sum + (a.avgReviewScore || 0), 0) / n;
+  const hasAnalysis = archives.filter(a => (a.analysis || "").length > 10).length;
+  const hasReflection = archives.filter(a => Object.keys(a.reflection || {}).length > 0).length;
+  const hasHypothesis = archives.filter(a => (a.hypothesis || "").length > 5).length;
+  const reportLengthSum = archives.reduce((sum, a) => sum + Math.min((a.report || "").length, 5000), 0) / Math.max(n, 1);
+
+  // 基础分：每完成一个会话 +0.15，最多贡献 2.5 分
+  const baseSession = Math.min(2.5, n * 0.15);
+  // review 分：review 均分 / 5 * 1.0，最多 1.0 分
+  const reviewBonus = Math.min(1.0, (avgReview / 5) * 1.0);
+  // 多样性分：不同 task 类型数 * 0.3，最多 1.5 分
+  const diversityBonus = Math.min(1.5, taskSet.size * 0.3);
+
+  return {
+    question:   clamp(baseSession + (n >= 1 ? 0.3 : 0)),
+    hypothesis: clamp(baseSession + (hasHypothesis / Math.max(n, 1)) * 1.0),
+    design:     clamp(baseSession + diversityBonus * 0.6 + reviewBonus * 0.8),
+    algorithm:  clamp(baseSession + diversityBonus),
+    analysis:   clamp(baseSession + (hasAnalysis / Math.max(n, 1)) * 1.0 + reviewBonus * 0.6),
+    reflection: clamp(baseSession + (hasReflection / Math.max(n, 1)) * 1.2),
+    expression: clamp(baseSession + (reportLengthSum / 2000) * 0.8 + reviewBonus * 0.5),
+  };
+}
+
+function clamp(v: number) { return Math.min(CAP, Math.max(0, Math.round(v * 10) / 10)); }
+
+function persistScores(s: Record<string, number>) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
 }
 
 export default function ProfilePage() {
   const navigate = useNavigate();
-  const [scores] = useState<Record<string, number>>(() => loadScores());
+  const scores = useMemo(() => {
+    const computed = computeScoresFromArchives();
+    persistScores(computed);  // sync to localStorage
+    return computed;
+  }, []);
   const hasData = Object.values(scores).some((s) => s > 0);
   const avg = hasData ? (Object.values(scores).reduce((a, b) => a + b, 0) / 7) : 0;
 
@@ -93,17 +140,30 @@ export default function ProfilePage() {
               })}
             </div>
 
-            {/* 更新规则 */}
-            <div className="card border-blue-100 bg-blue-50/30">
-              <h3 className="font-semibold text-sm text-gray-700 mb-2">画像更新规则</h3>
-              <ul className="text-xs text-gray-500 space-y-1">
-                <li>• 每次完成研究会话后自动评估更新</li>
-                <li>• 能明确指出自变量和因变量 → 实验设计能力 +0.2</li>
-                <li>• 只运行一次实验就下强结论 → 数据分析能力不增加</li>
-                <li>• 能指出实验局限 → 反思能力 +0.2</li>
-                <li>• 评估来源：学生输入、Agent 评分、实验设计质量、分析文本、报告评分</li>
-              </ul>
-            </div>
+            {/* 统计信息 */}
+            {(() => {
+              const archives = loadArchives();
+              const n = archives.length;
+              const tasks = [...new Set(archives.map(a => TASK_LABELS[a.taskId] || a.taskId))];
+              const avgReview = n > 0 ? (archives.reduce((s, a) => s + (a.avgReviewScore || 0), 0) / n).toFixed(1) : "0";
+              return (
+                <div className="card border-blue-100 bg-blue-50/30">
+                  <h3 className="font-semibold text-sm text-gray-700 mb-2">画像计算依据</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                    <div className="text-center"><p className="text-2xl font-bold text-gray-800">{n}</p><p className="text-[10px] text-gray-400">完成实验</p></div>
+                    <div className="text-center"><p className="text-2xl font-bold text-gray-800">{tasks.length}</p><p className="text-[10px] text-gray-400">任务类型</p></div>
+                    <div className="text-center"><p className="text-2xl font-bold text-gray-800">{avgReview}</p><p className="text-[10px] text-gray-400">平均审稿分</p></div>
+                    <div className="text-center"><p className="text-2xl font-bold text-gray-800">{Math.min(CAP, (n * 0.15 + tasks.length * 0.3 + Number(avgReview) / 5 * 1.0)).toFixed(1)}</p><p className="text-[10px] text-gray-400">评分上限参考</p></div>
+                  </div>
+                  <ul className="text-xs text-gray-500 space-y-1">
+                    <li>• 每次完成实验累计基础分（{n} × 0.15 = {(n * 0.15).toFixed(1)}，上限 2.5）</li>
+                    <li>• 尝试不同任务类型加分（{tasks.length} 种 × 0.3 = {(tasks.length * 0.3).toFixed(1)}，上限 1.5）</li>
+                    <li>• Review 评分加权（均分 {avgReview}/5，上限 1.0）</li>
+                    <li>• 各维度不超过上限 {CAP} 分，当前综合均分 {avg.toFixed(1)}/5</li>
+                  </ul>
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
@@ -158,10 +218,7 @@ function RadarChart({ scores, dimensions }: { scores: Record<string, number>; di
 }
 
 // ═══════════════════════════════════════════════════════════
-export function updateProfileScores(delta: Record<string, number>) {
-  const current = loadScores();
-  for (const [key, val] of Object.entries(delta)) {
-    current[key] = Math.min(5, Math.max(0, (current[key] || 0) + val));
-  }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
+export function updateProfileScores(_delta?: Record<string, number>) {
+  const computed = computeScoresFromArchives();
+  persistScores(computed);
 }
