@@ -132,4 +132,44 @@ describe("mnistStore", () => {
     const f2 = computeConfigFingerprint("standardcnn", { learningRate: 0.1, batchSize: 64, epochs: 10, optimizer: "SGD", momentum: 0.9, dropout: 0.25 });
     expect(f1).not.toBe(f2);
   });
+
+  // ── 重入清理测试 ──
+  it("同一 session 重入时清除 experimentResult 和 uploadInference", () => {
+    useMNISTStore.getState().init(1);
+    useMNISTStore.getState().set({
+      experimentResult: { experiment_batch_id: "x", status: "COMPLETED", summary: { final_train_accuracy: 0.99, final_test_accuracy: 0.98, best_epoch: 5, best_val_accuracy: 0.985, training_time: 30, overfitting_score: 0.01 }, runs: [] },
+      uploadInference: { fileName: "test", modelId: "minicnn", modelName: "MiniCNN", predicted: 5, confidence: 90, probabilities: [] },
+      trainingCurve: [{ epoch: 1, train_loss: 0.5, val_loss: 0.6, train_acc: 0.8, val_acc: 0.75 }],
+      currentEpoch: 3,
+      isTraining: true,
+    });
+    // Re-enter same session
+    useMNISTStore.getState().init(1);
+    const s = useMNISTStore.getState();
+    expect(s.experimentResult).toBeNull();
+    expect(s.uploadInference).toBeNull();
+    expect(s.trainingCurve).toEqual([]);
+    expect(s.currentEpoch).toBe(0);
+    expect(s.isTraining).toBe(false);
+  });
+
+  it("同一 session 重入时保留研究问题", () => {
+    useMNISTStore.getState().init(1);
+    useMNISTStore.getState().set({ refinedQuestion: "CNN 能识别数字吗？", rawQuestion: "能吗？", selectedArchitecture: "minicnn" });
+    useMNISTStore.getState().init(1);
+    const s = useMNISTStore.getState();
+    // Research state preserved
+    expect(s.refinedQuestion).toBe("CNN 能识别数字吗？");
+    expect(s.selectedArchitecture).toBe("minicnn");
+  });
+
+  it("不同 session 重入时完全重置", () => {
+    useMNISTStore.getState().init(1);
+    useMNISTStore.getState().set({ refinedQuestion: "test", selectedArchitecture: "minicnn" });
+    useMNISTStore.getState().init(2);
+    const s = useMNISTStore.getState();
+    expect(s.refinedQuestion).toBe("");
+    expect(s.selectedArchitecture).toBe("standardcnn");
+    expect(s.sessionId).toBe(2);
+  });
 });

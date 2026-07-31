@@ -74,10 +74,19 @@ describe("MNISTDrawCanvas", () => {
     const onReady = vi.fn();
     const { container } = render(<MNISTDrawCanvas onImageReady={onReady} />);
     const canvas = container.querySelector("canvas")!;
-    // Draw a stroke
     fireEvent.touchStart(canvas, { touches: [{ clientX: 100, clientY: 100 }] });
     fireEvent.touchMove(canvas, { touches: [{ clientX: 120, clientY: 120 }] });
     fireEvent.touchEnd(canvas);
+    expect(onReady).toHaveBeenCalled();
+  });
+
+  it("calls onImageReady on mouseup after drawing", () => {
+    const onReady = vi.fn();
+    const { container } = render(<MNISTDrawCanvas onImageReady={onReady} />);
+    const canvas = container.querySelector("canvas")!;
+    fireEvent.mouseDown(canvas, { clientX: 100, clientY: 100 });
+    fireEvent.mouseMove(canvas, { clientX: 120, clientY: 120 });
+    fireEvent.mouseUp(canvas);
     expect(onReady).toHaveBeenCalled();
   });
 

@@ -267,10 +267,6 @@ function Stage3() {
         />
       )}
 
-      {/* ── 公式说明 + 训练结果解读 ── */}
-      {result && displayRuns.length > 0 && (
-        <RLExplanation alpha={store.learningRate} gamma={store.discount} epsilon={store.epsilon} />
-      )}
     </StageContainer>
   );
 }
@@ -285,6 +281,16 @@ const AGENT_STYLES: Record<string, { bg: string; text: string; border: string }>
   SARSA: { bg: "bg-green-50", text: "text-green-700", border: "border-green-300" },
 };
 
+/** 根据格子字符返回即时奖励 */
+function cellReward(cell: string): number {
+  if (cell === "G") return 10.0;
+  if (cell === "T") return -10.0;
+  if (cell === "#") return -1.0;
+  return -0.1; // "." 空地
+}
+
+const ACT_DELTAS: [number, number][] = [[-1, 0], [1, 0], [0, -1], [0, 1]]; // ← → ↑ ↓
+
 function DualPathPanel({ world, comparePaths, runs, trial, nameOf }: {
   world: any;
   comparePaths: ComparePath[];
@@ -292,26 +298,27 @@ function DualPathPanel({ world, comparePaths, runs, trial, nameOf }: {
   trial: number;
   nameOf: (a: string) => string;
 }) {
+  const store = useRLStore();
+  const α = store.learningRate;
+  const γ = store.discount;
+
   const maxSteps = comparePaths.length > 0
     ? Math.min(...comparePaths.map(cp => cp.path.length - 1))
     : 0;
 
   const [animStep, setAnimStep] = useState(0);
   const [playing, setPlaying] = useState(true);
-  const [speed, setSpeed] = useState(1);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Reset on trial/data change
   const dataKey = `${trial}-${comparePaths.map(c => c.path.length).join(",")}`;
   const dataKeyRef = useRef(dataKey);
   useEffect(() => {
     if (dataKeyRef.current !== dataKey) { dataKeyRef.current = dataKey; setAnimStep(0); setPlaying(true); }
   }, [dataKey]);
 
-  // Animation timer
   useEffect(() => {
     if (playing && maxSteps > 0) {
-      const ms = Math.round(500 / speed);
+      const ms = Math.round(400);
       timerRef.current = setInterval(() => {
         setAnimStep(prev => {
           if (prev >= maxSteps) { setPlaying(false); return prev; }
@@ -320,150 +327,114 @@ function DualPathPanel({ world, comparePaths, runs, trial, nameOf }: {
       }, ms);
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [playing, speed, maxSteps]);
+  }, [playing, maxSteps]);
 
   const togglePlay = () => {
     if (animStep >= maxSteps) setAnimStep(0);
     setPlaying(p => !p);
   };
 
-  // Collect per-step decisions for current step from each agent's test_decisions
   const curDecisions = runs.map((r: any) => {
     const decs = r.test_decisions || [];
     const d = decs[Math.min(animStep, decs.length - 1)];
     return d ? { agent: r.agent, ...d } : null;
   }).filter(Boolean);
 
+  const nextDecisions = runs.map((r: any) => {
+    const decs = r.test_decisions || [];
+    const d = decs[Math.min(animStep + 1, decs.length - 1)];
+    return d ? { agent: r.agent, ...d } : null;
+  }).filter(Boolean);
+
+  const grid: string[][] = world?.grid || [];
+  const gSize = grid.length || 8;
+
   return (
     <div className="card overflow-x-auto">
-      <h3 className="font-semibold text-gray-700 mb-1 text-sm">第 {trial} 组 — 测试路径</h3>
-      <p className="text-xs text-gray-400 mb-3">
-        Q-learning (蓝色实线) vs SARSA (绿色虚线)，从同一起点出发，逐步展示每步决策。
-      </p>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="font-semibold text-gray-700 text-sm">第 {trial} 组 — 测试路径</h3>
+        <span className="text-[10px] text-gray-400">
+          {runs.map((r: any) => (
+            <span key={r.agent} className="ml-3">{nameOf(r.agent)} {r.test_success ? "✅" : "❌"} {r.test_reward}奖励</span>
+          ))}
+        </span>
+      </div>
 
-      <div className="flex gap-4 flex-wrap items-start">
-        {/* ── 双路径叠加 Canvas ── */}
+      {/* ── 居中大画布 ── */}
+      <div className="flex flex-col items-center gap-2">
         <RLGridVisualizer world={world} comparePaths={comparePaths} animatedStep={animStep} hideLegend />
 
-        {/* ── 控制 + 决策面板 ── */}
-        <div className="flex-1 min-w-[240px] max-w-sm">
-          {/* 播放控制 */}
-          <div className="flex items-center gap-2 mb-3">
-            <button onClick={togglePlay} className="px-3 py-1.5 rounded-full text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 min-w-[56px]">
-              {playing ? "⏸ 暂停" : "▶ 播放"}
-            </button>
-            <button onClick={() => { setPlaying(false); setAnimStep(0); }} className="px-2.5 py-1.5 rounded-full text-xs border border-gray-200 bg-white text-gray-500 hover:bg-gray-50">
-              ⏮ 重置
-            </button>
-            <select value={speed} onChange={e => setSpeed(Number(e.target.value))}
-              className="text-xs border border-gray-200 rounded-full px-2 py-1 bg-white">
-              <option value={0.5}>0.5x</option>
-              <option value={1}>1x</option>
-              <option value={2}>2x</option>
-            </select>
-          </div>
+        {/* 播放控制 */}
+        <div className="flex items-center gap-2">
+          <button onClick={togglePlay} className="px-3 py-1.5 rounded-full text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 min-w-[56px]">
+            {playing ? "⏸ 暂停" : "▶ 播放"}
+          </button>
+          <button onClick={() => { setPlaying(false); setAnimStep(0); }} className="px-2.5 py-1.5 rounded-full text-xs border border-gray-200 bg-white text-gray-500 hover:bg-gray-50">
+            ⏮ 重置
+          </button>
+          <input type="range" min={0} max={maxSteps} value={animStep}
+            onChange={e => { setPlaying(false); setAnimStep(Number(e.target.value)); }}
+            className="w-32 h-1.5 accent-blue-600" />
+          <span className="text-[10px] text-gray-400">Step {animStep}/{maxSteps}</span>
+        </div>
 
-          {/* 步数滑块 */}
-          <div className="mb-3">
-            <input type="range" min={0} max={maxSteps} value={animStep}
-              onChange={e => { setPlaying(false); setAnimStep(Number(e.target.value)); }}
-              className="w-full h-1.5 accent-blue-600" />
-            <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
-              <span>Step {animStep}/{maxSteps}</span>
-              <span>{animStep === maxSteps ? "✅ 完成" : ""}</span>
-            </div>
-          </div>
+        {/* 图例 */}
+        <div className="flex gap-4 text-[10px] text-gray-400">
+          <span><span className="inline-block w-4 h-0.5 rounded mr-1 align-middle" style={{ background: "#1565c0" }} />Q-learning</span>
+          <span><span className="inline-block w-4 h-0.5 rounded mr-1 align-middle" style={{ background: "#2e7d32", borderTop: "2px dashed #2e7d32" }} />SARSA</span>
+        </div>
+      </div>
 
-          {/* ── 每步决策详情 + 原因解释 ── */}
-          {curDecisions.length > 0 && (
-            <div className="space-y-2">
-              <span className="text-[10px] font-medium text-gray-500">第 {animStep + 1} 步决策</span>
-              {curDecisions.map((d: any) => {
-                const style = AGENT_STYLES[d.agent] || AGENT_STYLES.Q_LEARNING;
-                const allQs = d.q_values || [];
-                const bestIdx = d.best_action ?? 0;
-                const chosenIdx = d.action ?? 0;
-                const maxAbsQ = allQs.length > 0 ? Math.max(...allQs.map((v: number) => Math.abs(v))) : 1;
-                return (
-                  <div key={d.agent} className={`border rounded-lg p-2.5 ${style.bg} ${style.border}`}>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className={`text-xs font-semibold ${style.text}`}>{nameOf(d.agent)}</span>
-                      <span className="text-[10px] text-gray-500">
-                        ({d.state?.[0]},{d.state?.[1]}) → <b>{ACTION_LABELS[chosenIdx]}</b>
-                      </span>
-                    </div>
-                    {/* Q 值条 */}
-                    <div className="space-y-0.5">
-                      {allQs.map((v: number, i: number) => (
-                        <div key={i} className="flex items-center gap-1.5 text-[10px]">
-                          <span className={`w-4 text-right font-mono ${i === bestIdx ? "font-bold" : "text-gray-400"}`}>
-                            {ACTION_LABELS[i]}
+      {/* ── 公式计算 ── */}
+      {curDecisions.length > 0 && (
+        <div className="mt-4 pt-3 border-t border-gray-200">
+          <h4 className="font-semibold text-gray-600 text-xs mb-2">🧭 四个方向的分数怎么算出来的？</h4>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {curDecisions.map((d: any) => {
+              const allQs: number[] = d.q_values || [];
+              const isQL = d.agent === "Q_LEARNING";
+              const style = AGENT_STYLES[d.agent] || AGENT_STYLES.Q_LEARNING;
+              const agentLabel = isQL ? "Q-learning" : "SARSA";
+              const nextD: any = nextDecisions.find((n: any) => n.agent === d.agent);
+              const maxNext = nextD?.q_values ? Math.max(...nextD.q_values) : Math.max(...allQs);
+              const sarsaNext = nextD?.q_values ? (nextD.q_values[nextD.action ?? nextD.best_action ?? 0] ?? 0) : 0;
+              const futureX = isQL ? maxNext : sarsaNext;
+              const formulaLabel = isQL ? `max Q(s',a') = max(${(nextD?.q_values || allQs).map((v: number) => v.toFixed(1)).join(",")}) = ${futureX.toFixed(1)}` : `Q(s',a') = ${futureX.toFixed(1)}（实际选了${nextD ? ACTION_LABELS[nextD.action ?? nextD.best_action ?? 0] : "?"}）`;
+              const explain = isQL ? "乐观 — 拿下一步四个方向中的最大值来算" : "保守 — 拿下一步实际选择的方向来算";
+
+              return (
+                <div key={d.agent} className={`border rounded-lg p-2.5 text-[11px] ${style.bg} ${style.border}`}>
+                  <p className={`font-semibold mb-1 ${style.text}`}>
+                    {agentLabel}：Q ← Q + {α}×[ r + {γ}×X − Q ]，X={futureX.toFixed(1)}（{explain}）
+                  </p>
+                  <p className="text-gray-400 text-[10px] mb-1">{formulaLabel}</p>
+                  <div className="space-y-0.5 font-mono">
+                    {allQs.map((q: number, i: number) => {
+                      const [dx, dy] = ACT_DELTAS[i];
+                      const nx = (d.state?.[0] ?? 0) + dx;
+                      const ny = (d.state?.[1] ?? 0) + dy;
+                      let r = -1.0;
+                      if (nx >= 0 && nx < gSize && ny >= 0 && ny < gSize) r = cellReward(grid[ny]?.[nx] ?? ".");
+                      const delta = α * (r + γ * futureX - q);
+                      const newQ = q + delta;
+                      return (
+                        <div key={i} className="flex items-center gap-2 text-[10px] leading-relaxed">
+                          <span className={`w-4 text-right ${i === (d.best_action ?? 0) ? "font-bold text-gray-800" : "text-gray-400"}`}>{ACTION_LABELS[i]}</span>
+                          <span className="text-gray-500">
+                            Q={q.toFixed(1)} + {α}×({r >= 0 ? "+" : ""}{r} + {γ}×{futureX.toFixed(1)} − {q >= 0 ? "+" : ""}{q.toFixed(1)})
                           </span>
-                          <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all ${i === bestIdx ? (d.agent === "Q_LEARNING" ? "bg-blue-500" : "bg-green-500") : "bg-gray-400"}`}
-                              style={{ width: `${maxAbsQ > 0 ? Math.max(3, Math.abs(v) / maxAbsQ * 100) : 0}%` }}
-                            />
-                          </div>
-                          <span className={`w-11 text-right font-mono ${i === bestIdx ? "font-bold " + style.text : "text-gray-400"}`}>
-                            {v >= 0 ? "+" : ""}{v.toFixed(1)}
-                          </span>
+                          <span className={`font-bold ${delta >= 0 ? "text-green-600" : "text-red-500"}`}>= {newQ >= 0 ? "+" : ""}{newQ.toFixed(2)}</span>
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* 结果摘要 */}
-          <div className="mt-3 pt-3 border-t border-gray-100 grid grid-cols-2 gap-2">
-            {runs.map((r: any) => (
-              <div key={r.agent} className="text-center text-[10px]">
-                <span className="font-semibold">{nameOf(r.agent)}</span>
-                <span className="text-gray-400 ml-1">
-                  {r.test_success ? "✅" : "❌"} {r.test_reward} 奖励 · {Math.round(r.runtime_ms)}ms
-                </span>
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
+          <p className="text-[10px] text-gray-300 mt-2">r = 该方向的即时奖励（💰+10 / 💀−10 / 🧱−1 / ⬜−0.1），α={α} γ={γ}</p>
         </div>
-      </div>
-    </div>
-  );
-}
-
-// ═════════════════════════════════════════════════
-// 训练结果解释 + 奖励计算公式
-// ═════════════════════════════════════════════════
-
-function RLExplanation({ alpha, gamma, epsilon }: {
-  alpha: number; gamma: number; epsilon: number;
-}) {
-  return (
-    <div className="space-y-4">
-      {/* ── Q-learning vs SARSA 公式对比 ── */}
-      <div className="card border-purple-100 bg-purple-50/20">
-        <h3 className="font-semibold text-gray-700 mb-2 text-sm">🔢 Q-learning vs SARSA — 更新规则差异</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-          <div className="bg-white rounded-lg p-3 border border-blue-100">
-            <p className="font-bold text-blue-700 mb-1">Q-learning (Off-policy)</p>
-            <p className="font-mono text-gray-600 mb-1">Q(s,a) ← Q(s,a) + α·[ r + γ·<span className="text-blue-600 font-bold">max Q(s',a')</span> − Q(s,a) ]</p>
-            <p className="text-gray-400 mt-1">更新用<span className="font-semibold text-blue-600">最优未来动作的 Q 值</span>计算目标，假设下一步一定选最优动作，不考虑探索时的随机选择。因此更<span className="font-semibold text-blue-600">激进</span>，敢于贴边走捷径。</p>
-          </div>
-          <div className="bg-white rounded-lg p-3 border border-green-100">
-            <p className="font-bold text-green-700 mb-1">SARSA (On-policy)</p>
-            <p className="font-mono text-gray-600 mb-1">Q(s,a) ← Q(s,a) + α·[ r + γ·<span className="text-green-600 font-bold">Q(s',a')</span> − Q(s,a) ]</p>
-            <p className="text-gray-400 mt-1">更新用<span className="font-semibold text-green-600">实际选取的下一步动作的 Q 值</span>计算目标，考虑到探索中的随机选择可能带来的风险。因此更<span className="font-semibold text-green-600">保守</span>，会主动绕开陷阱。</p>
-          </div>
-        </div>
-        <div className="mt-2 bg-white rounded-lg p-2 text-[11px] text-gray-500 grid grid-cols-3 gap-2 text-center">
-          <div><span className="block text-gray-400">当前参数</span><b>α={alpha}</b> <span className="text-gray-300">学习率</span></div>
-          <div><span className="block text-gray-400">当前参数</span><b>γ={gamma}</b> <span className="text-gray-300">折扣因子</span></div>
-          <div><span className="block text-gray-400">当前参数</span><b>ε={epsilon}</b> <span className="text-gray-300">探索率</span></div>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

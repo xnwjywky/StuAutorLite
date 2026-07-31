@@ -259,7 +259,7 @@ function Stage5() {
   const displayRuns = result?.runs ? result.runs.filter((r: any) => r.trial === store.selectedTrial) : [];
   const algoList = isSort ? SORT_ALGOS : SEARCH_ALGOS;
   const nameOf = (a: string) => algoList.find(x => x.key === a)?.name || a;
-  const layoutClass = isSort ? "grid grid-cols-1 md:grid-cols-2 gap-4" : "space-y-6";
+  const layoutClass = "grid grid-cols-1 md:grid-cols-2 gap-4";
   const configText = isSort
     ? `算法：${(selected.length>0?selected:defAlgos).map(nameOf).join("、")} | ${store.arraySize} 元素 | ${store.dataPattern==="random"?"随机":store.dataPattern==="reversed"?"逆序":"基本有序"} | ×${store.numTrials} 次`
     : `算法：${(selected.length>0?selected:defAlgos).map(nameOf).join("、")} | 文本 ${store.textLength} 字符 | 模式串 ${store.patternLength} 字符 | ×${store.numTrials} 次`;
@@ -269,7 +269,7 @@ function Stage5() {
     {result && (isSort ? (<div className="card"><div className="grid grid-cols-1 lg:grid-cols-2 gap-4">{[
       { data: Object.entries(result.summary).map(([a,s]:any)=>({algorithm:a,v:s.avg_swaps})), key: "v", label: "平均交换次数" },
       { data: Object.entries(result.summary).map(([a,s]:any)=>({algorithm:a,v:s.avg_comparisons})), key: "v", label: "平均比较次数" },
-    ].map(chart => (<ChartPanel key={chart.label} data={chart.data} singleMetric={{key:chart.key,label:chart.label}} xKey="algorithm" />))}</div></div>) : (<ChartPanel data={Object.entries(result.summary).map(([a,s]:any)=>({algorithm:a,v:s.avg_comparisons}))} singleMetric={{key:"v",label:"平均比较次数"}} xKey="algorithm" />))}
+    ].map(chart => (<ChartPanel key={chart.label} data={chart.data} singleMetric={{key:chart.key,label:chart.label}} xKey="algorithm" />))}</div></div>) : (<div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><ChartPanel data={Object.entries(result.summary).map(([a,s]:any)=>({algorithm:a,v:s.avg_comparisons}))} singleMetric={{key:"v",label:"平均比较次数"}} xKey="algorithm" /><ChartPanel data={Object.entries(result.summary).map(([a,s]:any)=>({algorithm:a,v:s.avg_runtime_ms}))} singleMetric={{key:"v",label:"平均耗时 (ms)"}} xKey="algorithm" /></div>))}
   </StageContainer>);
 }
 

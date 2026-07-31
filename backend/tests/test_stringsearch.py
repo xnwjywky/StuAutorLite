@@ -8,6 +8,13 @@ class TestNaive:
     def test_basic(self): r = naive_search("abcabc", "abc"); assert r["matches"] == [0, 3]
     def test_no_match(self): r = naive_search("aaaa", "b"); assert r["matches"] == []
     def test_comparisons(self): r = naive_search("abcde", "abc"); assert r["comparisons"] >= 3
+    def test_emits_found_steps(self):
+        """匹配成功时 step 序列中包含 'found' 类型步骤。"""
+        r = naive_search("abcabc", "abc"); steps = r["steps"]
+        found_steps = [s for s in steps if s["type"] == "found"]
+        assert len(found_steps) == 2  # 两处匹配
+        assert found_steps[0]["i"] == 0
+        assert found_steps[1]["i"] == 3
 
 
 class TestKMP:
@@ -24,6 +31,16 @@ class TestBoyerMoore:
 class TestRabinKarp:
     def test_basic(self): r = rabin_karp_search("abcabc", "abc"); assert 0 in r["matches"]
     def test_no_match(self): r = rabin_karp_search("aaaa", "b"); assert r["matches"] == []
+    def test_comparisons_count_hash(self):
+        """哈希比对计入比较次数 — 200 字符文本约 ~200 次比较（哈希 + 逐字符验证）。"""
+        r = StringSearchRunner().run({"algorithms": ["RABIN_KARP"], "text_length": 200, "num_trials": 1, "seed": 42})
+        comps = r["summary"]["RABIN_KARP"]["avg_comparisons"]
+        assert comps >= 150, f"Expected >=150 hash+verify comparisons for 200-char text, got {comps}"
+    def test_emits_found_steps(self):
+        """Rabin-Karp 匹配成功时 step 序列中包含 'found' 步骤。"""
+        r = rabin_karp_search("abcabc", "abc"); steps = r["steps"]
+        found_steps = [s for s in steps if s["type"] == "found"]
+        assert len(found_steps) == 2
 
 
 class TestStringSearchRunner:

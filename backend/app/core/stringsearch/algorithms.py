@@ -104,6 +104,7 @@ def rabin_karp_search(text: str, pattern: str) -> dict:
 
     for i in range(n - m + 1):
         steps.append({"type": "hash_compare", "i": i, "p_hash": p_hash, "t_hash": t_hash, "text": text, "pattern": pattern})
+        comps += 1  # 哈希比对等同于一次比较
         if p_hash == t_hash:
             match = True
             for j in range(m):
@@ -111,7 +112,7 @@ def rabin_karp_search(text: str, pattern: str) -> dict:
                 steps.append({"type": "verify", "i": i, "j": j, "match": text[i + j] == pattern[j], "text": text, "pattern": pattern})
                 if text[i + j] != pattern[j]:
                     match = False; break
-            if match: matches.append(i)
+            if match: matches.append(i); steps.append({"type": "found", "i": i, "text": text, "pattern": pattern})
         if i < n - m:
             t_hash = (d * (t_hash - ord(text[i]) * h) + ord(text[i + m])) % q
             if t_hash < 0: t_hash += q

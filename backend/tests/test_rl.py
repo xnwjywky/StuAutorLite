@@ -15,6 +15,20 @@ class TestGridWorld:
         # 金币可达
         assert env._reachable()
 
+    def test_high_obstacle_ratio_stays_reachable(self):
+        """高障碍率 (40%) 下 _ensure_reachable 保证起点到金币始终连通。"""
+        for s in range(20):
+            env = GridWorld(size=8, num_traps=3, obstacle_ratio=0.4, seed=s)
+            env.reset()
+            assert env._reachable(), f"Seed {s}: not reachable after _ensure_reachable"
+
+    def test_large_obstacle_ratio_small_map(self):
+        """小地图 + 高障碍率也能连通。"""
+        for s in range(10):
+            env = GridWorld(size=5, num_traps=2, obstacle_ratio=0.35, seed=s)
+            env.reset()
+            assert env._reachable(), f"Seed {s}: 5x5 not reachable"
+
     def test_reproducibility(self):
         env1 = GridWorld(size=8, seed=42)
         env1.reset()
@@ -241,3 +255,30 @@ class TestEvalCompare:
         snaps = result["q_snapshots"]
         last_snap = snaps[-1]
         assert last_snap["epsilon"] < 0.12  # 训练末段 ε 已衰减
+
+    def test_runs_field_for_batch_compat(self):
+        """eval_compare 结果中包含 runs 字段，与批量实验格式兼容。"""
+        runner = RLRunner()
+        result = runner.run_eval_compare({
+            "agents": ["Q_LEARNING", "SARSA"], "grid_size": 6, "num_traps": 2,
+            "num_episodes": 100, "seed": 42,
+        })
+        assert "runs" in result
+        assert result["total_runs"] == 2
+        for run in result["runs"]:
+            for key in ("agent", "test_path", "test_success", "test_reward", "world", "runtime_ms"):
+                assert key in run, f"Missing key in run: {key}"
+            assert run["trial"] == 1
+
+    def test_batch_run_includes_test_decisions(self):
+        """批量 runner 每个 run 包含 test_decisions（每步 Q 值详情）。"""
+        runner = RLRunner()
+        result = runner.run({
+            "agents": ["Q_LEARNING"], "grid_size": 6, "num_traps": 2,
+            "num_episodes": 100, "num_trials": 1, "seed": 42,
+        })
+        run = result["runs"][0]
+        assert "test_decisions" in run
+        decs = run["test_decisions"]
+        assert len(decs) >= 1
+        assert len(decs[0]["q_values"]) == 4

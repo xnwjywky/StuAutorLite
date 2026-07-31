@@ -9,7 +9,7 @@
 import { useRef, useEffect, useState } from "react";
 
 function calcCellSize(gridSize: number) {
-  return Math.max(22, Math.floor(360 / gridSize));
+  return Math.max(28, Math.floor(520 / gridSize));
 }
 
 const PAD = 8;

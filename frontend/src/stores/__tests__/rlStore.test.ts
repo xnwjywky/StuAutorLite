@@ -65,4 +65,47 @@ describe("rlStore", () => {
     useRLStore.getState().set({ selectedAgents: [] });
     expect(useRLStore.getState().selectedAgents).toEqual([]);
   });
+
+  // ── 重入清理测试 ──
+  it("同一 session 重入时清除 experimentResult 和 evalCompare", () => {
+    useRLStore.getState().init(1);
+    useRLStore.getState().set({
+      experimentResult: { experiment_batch_id: "abc", status: "COMPLETED", total_runs: 2, summary: {}, runs: [] },
+      evalCompare: { world: {}, compare_paths: {}, compare_decisions: {}, q_snapshots: [], train_rewards: {}, train_success: {}, summary: {}, grid_size: 8, num_episodes: 2000 },
+    });
+    useRLStore.getState().init(1);
+    const s = useRLStore.getState();
+    expect(s.experimentResult).toBeNull();
+    expect(s.evalCompare).toBeNull();
+  });
+
+  it("同一 session 重入时保留研究问题", () => {
+    useRLStore.getState().init(1);
+    useRLStore.getState().set({ refinedQuestion: "Q-learning vs SARSA", rawQuestion: "vs" });
+    useRLStore.getState().init(1);
+    expect(useRLStore.getState().refinedQuestion).toBe("Q-learning vs SARSA");
+  });
+
+  it("不同 session 重入时不保留研究问题", () => {
+    useRLStore.getState().init(1);
+    useRLStore.getState().set({ refinedQuestion: "Q-learning vs SARSA" });
+    useRLStore.getState().init(2);
+    expect(useRLStore.getState().refinedQuestion).toBe("");
+  });
+
+  it("evalCompare 可存储和读取", () => {
+    useRLStore.getState().init(1);
+    const mock: any = {
+      world: { grid: [], size: 8 },
+      compare_paths: { Q_LEARNING: [[0, 0], [1, 0]], SARSA: [[0, 0], [0, 1]] },
+      compare_decisions: { Q_LEARNING: [], SARSA: [] },
+      q_snapshots: [{ episode: 100, agent: "Q_LEARNING", epsilon: 0.02, cells: [] }],
+      train_rewards: { Q_LEARNING: [1, 2], SARSA: [3, 4] },
+      train_success: { Q_LEARNING: [0, 1], SARSA: [0, 1] },
+      summary: { Q_LEARNING: { avg_reward: 1.5 }, SARSA: { avg_reward: 2.0 } },
+      grid_size: 8, num_episodes: 500,
+    };
+    useRLStore.getState().set({ evalCompare: mock });
+    expect(useRLStore.getState().evalCompare?.grid_size).toBe(8);
+  });
 });
