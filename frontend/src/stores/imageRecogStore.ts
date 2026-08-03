@@ -37,9 +37,11 @@ export interface ImageRecogWorkflowData {
   // 当前查看的 trial
   selectedTrial: number;
 
-  // 分析 + 报告
+  // 分析 + 反思 + 报告
   studentAnalysis: string;
   aiAnalysis: { summary: string; key_findings: string[]; questions_for_student: string[] } | null;
+  reflectionAnswers: Record<number, string>;
+  reflectionQuestions: string[];
   reportMarkdown: string;
 }
 
@@ -53,7 +55,9 @@ const defaults = (): ImageRecogWorkflowData => ({
   designCompleted: false,
   experimentResult: null,
   selectedTrial: 1,
-  studentAnalysis: "", aiAnalysis: null, reportMarkdown: "",
+  studentAnalysis: "", aiAnalysis: null,
+  reflectionAnswers: {}, reflectionQuestions: [],
+  reportMarkdown: "",
 });
 
 export const useImageRecogStore = create<ImageRecogWorkflowData & {

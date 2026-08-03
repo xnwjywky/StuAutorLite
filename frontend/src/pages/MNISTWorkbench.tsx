@@ -10,6 +10,7 @@ import FlowStepper from "../components/FlowStepper";
 import StageContainer from "../components/StageContainer";
 import TrainingCurve from "../components/TrainingCurve";
 import MNISTDrawCanvas from "../components/MNISTDrawCanvas";
+import ReflectionStage from "../components/ReflectionStage";
 import { useMNISTStore, computeConfigFingerprint } from "../stores/mnistStore";
 import { saveQuestion, saveAnalysis, callMentor, callDataAnalyst, hasAgentConfig, logAgentError } from "../api/service";
 import { detectBaseUrl } from "../api/client";
@@ -256,7 +257,7 @@ function Stage2() {
         <h2 className="font-semibold text-gray-700 mb-3">网络架构设计器</h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
           {ARCHITECTURES.map(a => (
-            <button key={a.id} onClick={() => store.set({ selectedArchitecture: a.id })} className={`text-left px-3 py-2 rounded-lg text-xs border transition-all ${store.selectedArchitecture === a.id ? "border-gray-900 bg-gray-900 text-white font-medium" : "border-gray-200 bg-white text-gray-600 hover:border-gray-400"}`}>
+            <button key={a.id} onClick={() => store.set({ selectedArchitecture: a.id })} className={`text-left px-3 py-2 rounded-lg text-xs border transition-all ${store.selectedArchitecture === a.id ? "ring-2 ring-gray-500 bg-gray-50/50 border-gray-300" : "border-gray-200 bg-white text-gray-600 hover:border-gray-400"}`}>
               <div className="font-semibold">{a.name}</div><div className="text-[10px] opacity-70">{a.params} 参数</div>
             </button>
           ))}
@@ -850,25 +851,29 @@ function Stage4() {
 
 // ═══════ Stage5 ═══════
 
-const REFLECTION_QUESTIONS = [
-  { id: 1, q: "你的实验结果是否支持最初的假设？为什么？", category: "假设验证" },
-  { id: 2, q: "训练准确率高于测试准确率说明了什么？如何缓解？", category: "模型分析" },
-  { id: 3, q: "如果学习率增大10倍，你预测会发生什么？", category: "超参数影响" },
-  { id: 4, q: "增加一个卷积层是否一定能提升准确率？为什么？", category: "网络结构" },
-  { id: 5, q: "如果要进一步提升准确率，你会尝试什么方法？", category: "改进方向" },
+const REFLECTION_FALLBACK = [
+  "训练准确率高于测试准确率说明什么？如何缓解？",
+  "哪种网络架构准确率最高？参数量越大一定越好吗？",
+  "学习率或训练轮数对最终结果影响大吗？",
+  "增加卷积层一定能提升准确率吗？",
+  "通过这次实验，你对深度学习有什么新的理解？",
 ];
 
 function Stage5() {
   const store = useMNISTStore();
   return (
-    <StageContainer step={5} title="反思改进" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("RESULT_ANALYZED")}>← 上一步</button><button className="btn-primary" onClick={() => store.setStage("REPORT_GENERATED")}>下一步 → 生成报告</button></div>}>
-      <div className="card"><h2 className="font-semibold text-gray-700 mb-3">反思问题</h2><p className="text-xs text-gray-400 mb-4">回答以下问题，深入思考你的实验</p>
-        <div className="space-y-4">{REFLECTION_QUESTIONS.map(rq => (
-          <div key={rq.id}><label className="text-sm font-medium text-gray-700 mb-1 block">{rq.id}. {rq.q} <span className="text-[10px] text-gray-400">({rq.category})</span></label>
-            <textarea className="w-full p-2 border rounded-lg text-sm resize-y min-h-[60px]" placeholder="写下你的思考..." value={store.reflectionAnswers[rq.id] || ""} onChange={e => store.set({ reflectionAnswers: { ...store.reflectionAnswers, [rq.id]: e.target.value } })} /></div>
-        ))}</div>
-      </div>
-    </StageContainer>
+    <ReflectionStage
+      sessionId={store.sessionId!}
+      taskId={store.taskId}
+      reflectionAnswers={store.reflectionAnswers}
+      onChange={(a) => store.set({ reflectionAnswers: a })}
+      fallbackQuestions={REFLECTION_FALLBACK}
+      onQuestions={(qs) => store.set({ reflectionQuestions: qs })}
+      onBack={() => store.setStage("RESULT_ANALYZED")}
+      onNext={() => store.setStage("REPORT_GENERATED")}
+      step={5}
+      nextLabel="下一步 → 生成报告"
+    />
   );
 }
 
@@ -880,13 +885,14 @@ function Stage6() {
   const archName = ARCHITECTURES.find(a => a.id === store.selectedArchitecture)?.name || store.selectedArchitecture;
   const hp = store.hyperparameters;
   if (!store.reportMarkdown) {
+    const refQs = store.reflectionQuestions.length > 0 ? store.reflectionQuestions : REFLECTION_FALLBACK;
     store.set({ reportMarkdown: [
         "# MNIST 手写数字识别研究报告", "", "## 1. 研究问题", store.refinedQuestion || store.rawQuestion, "",
         "## 2. 我的假设", store.hypothesis, "", "## 3. 实验设计",
         `- 网络架构: ${archName} (${store.selectedArchitecture})`, `- 学习率: ${hp.learningRate}  |  批次大小: ${hp.batchSize}  |  训练轮数: ${hp.epochs}`, `- 优化器: ${hp.optimizer}  |  Momentum: ${hp.momentum}  |  Dropout: ${hp.dropout}`, "",
         "## 4. 实验结果", result ? [`| 指标 | 值 |`, `|---|---|`, `| 最终训练准确率 | ${(result.summary.final_train_accuracy * 100).toFixed(1)}% |`, `| 最终测试准确率 | ${(result.summary.final_test_accuracy * 100).toFixed(1)}% |`, `| 最佳测试准确率 | ${(result.summary.best_val_accuracy * 100).toFixed(1)}% (第${result.summary.best_epoch}轮) |`, `| 训练时间 | ${result.summary.training_time}秒 |`, `| 过拟合程度 | ${(result.summary.overfitting_score * 100).toFixed(1)}% |`].join("\n") : "暂无数据", "",
         "## 5. 我的分析", store.studentAnalysis, "", "## 6. 反思与改进",
-        ...REFLECTION_QUESTIONS.map(rq => `- **${rq.q}**\n  ${store.reflectionAnswers[rq.id] || "(未回答)"}\n`), "## 7. 总结",
+        ...refQs.map((q, i) => `- **${q}**\n  ${store.reflectionAnswers[i] || "(未回答)"}\n`), "## 7. 总结",
       ].join("\n") });
   }
   return (

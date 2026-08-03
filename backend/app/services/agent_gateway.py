@@ -5,12 +5,17 @@
 import json
 import re
 import time
+import threading
+from pathlib import Path
 from app.utils.llm_client import LLMClient
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 MAX_RETRIES = 1  # 只重试 1 次，减少无效 token 消耗
+
+# Token 用量持久化文件（backend/data/token_usage.json）
+_USAGE_FILE = Path(__file__).resolve().parent.parent.parent / "data" / "token_usage.json"
 
 
 def _schema_to_prompt(schema: dict | None) -> str:
@@ -44,6 +49,53 @@ class AgentGateway:
         self.llm = llm
         self.agents: dict[str, object] = {}
         self._call_log: list[dict] = []
+        # Token 用量累计（持久化到 JSON，重启不丢失）
+        self._usage_lock = threading.Lock()
+        self._usage: dict = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "calls": 0,
+            "model": "",
+            "since": None,
+        }
+        self._load_usage()
+
+    # ── Token 用量统计 ─────────────────────────────────────
+    def record_usage(self, usage: dict | None, model: str = ""):
+        """记录一次 LLM 调用消耗。usage 为 None 时只累计调用次数。"""
+        with self._usage_lock:
+            self._usage["calls"] += 1
+            if model:
+                self._usage["model"] = model
+            if usage:
+                self._usage["prompt_tokens"] += int(usage.get("prompt_tokens") or 0)
+                self._usage["completion_tokens"] += int(usage.get("completion_tokens") or 0)
+                self._usage["total_tokens"] += int(usage.get("total_tokens") or 0)
+            if not self._usage["since"]:
+                self._usage["since"] = time.time()
+        self._save_usage()
+
+    def get_token_usage(self) -> dict:
+        with self._usage_lock:
+            return dict(self._usage)
+
+    def _load_usage(self):
+        try:
+            if _USAGE_FILE.exists():
+                data = json.loads(_USAGE_FILE.read_text(encoding="utf-8"))
+                self._usage.update({k: data.get(k, v) for k, v in self._usage.items()})
+        except Exception:
+            logger.warning("token_usage.json 读取失败，使用内存计数")
+
+    def _save_usage(self):
+        try:
+            _USAGE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            tmp = _USAGE_FILE.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self._usage, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.replace(_USAGE_FILE)
+        except Exception:
+            pass
 
     def register(self, agent):
         name = getattr(agent, "name", type(agent).__name__.lower())
@@ -84,6 +136,8 @@ class AgentGateway:
                             {"role": "system", "content": system_msg},
                             {"role": "user", "content": prompt},
                         ])
+                        # 无论 JSON 是否解析成功，HTTP 调用已消耗 token
+                        self.record_usage(self.llm.last_usage, self.llm.model)
                         if raw and not raw.get("error"):
                             validated = self._validate_and_repair(agent, raw)
                             if validated:

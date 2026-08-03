@@ -45,6 +45,7 @@ export interface WorkflowData {
 
   // Stage 7 — 反思改进
   reflectionAnswers: Record<number, string>;
+  reflectionQuestions: string[];
 
   // Stage 8 — 研究报告
   reportMarkdown: string;
@@ -85,6 +86,7 @@ const defaults = (): WorkflowData => ({
   studentAnalysis: "",
   aiAnalysis: null,
   reflectionAnswers: {},
+  reflectionQuestions: [],
   reportMarkdown: "",
   reportId: null,
   reviewResult: null,

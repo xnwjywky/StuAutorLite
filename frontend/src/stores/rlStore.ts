@@ -40,6 +40,8 @@ export interface RLWorkflowData {
 
   studentAnalysis: string;
   aiAnalysis: { summary: string; key_findings: string[]; questions_for_student: string[] } | null;
+  reflectionAnswers: Record<number, string>;
+  reflectionQuestions: string[];
   reportMarkdown: string;
 }
 
@@ -47,13 +49,15 @@ const defaults = (): RLWorkflowData => ({
   sessionId: null, taskId: "rl_gridworld", currentStage: "TASK_SELECTED",
   rawQuestion: "", refinedQuestion: "", suggestedQuestions: [],
   hypothesis: "",
-  selectedAgents: ["Q_LEARNING", "SARSA"],
+  selectedAgents: [],
   gridSize: 8, numTraps: 3, numEpisodes: 2000,
   learningRate: 0.1, discount: 0.9, epsilon: 0.1,
   numTrials: 3, designCompleted: false,
   experimentResult: null, selectedTrial: 1,
   evalCompare: null,
-  studentAnalysis: "", aiAnalysis: null, reportMarkdown: "",
+  studentAnalysis: "", aiAnalysis: null,
+  reflectionAnswers: {}, reflectionQuestions: [],
+  reportMarkdown: "",
 });
 
 export const useRLStore = create<RLWorkflowData & {

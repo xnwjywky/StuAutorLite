@@ -10,14 +10,13 @@ import StageContainer from "../components/StageContainer";
 import ChartPanel from "../components/ChartPanel";
 import AlgorithmCard from "../components/AlgorithmCard";
 import DecisionBoundary from "../components/DecisionBoundary";
+import ReflectionStage from "../components/ReflectionStage";
 import { useClassificationStore } from "../stores/classificationStore";
 import {
   runClassificationExperiment,
   callMentor, callDataAnalyst, callReviewer, callGeneralLLM,
   hasAgentConfig, logAgentError,
-  generateReflectionQuestions, getReflectionQuestions, saveReflectionAnswer,
   saveQuestion, saveAnalysis, analyzeResults,
-  type ReflectionQuestion,
 } from "../api/service";
 import { archiveSession } from "./Archive";
 import { updateProfileScores } from "./ProfilePage";
@@ -43,11 +42,11 @@ const QUESTION_TEMPLATES = [
   "圆形数据和分堆数据，哪个更难分类？",
 ];
 const REFLECTION_QUESTIONS = [
-  "你的结果是否支持最初假设？为什么？",
-  "哪种分类器在噪声较低的数据上表现最好？哪种最稳定？",
-  "有没有出现意外结果？你如何解释？",
-  "如果换成圆形数据，你的结论还会一样吗？",
-  "你的实验有什么局限（例如数据量太小、只测试了一种分布）？",
+  "哪个分类器的准确率最高？噪声变大时哪个最先撑不住？",
+  "KNN 的 K 值大小对决策边界和准确率影响大吗？",
+  "决策树的边界是直线还是曲线？它适合复杂数据吗？",
+  "样本量或噪声变化时，哪个分类器最稳定？",
+  "通过这次实验，你对机器学习有什么新的理解？",
 ];
 const CLASSIFIERS: { key: ClassifierType; name: string; description: string; pros: string[]; cons: string[] }[] = [
   { key: "KNN", name: "KNN", description: "看邻居的标签来投票决定", pros: ["直观易懂","无需训练"], cons: ["数据量大时较慢","对噪声敏感"] },
@@ -449,63 +448,18 @@ function Stage6() {
 
 function Stage7() {
   const store = useClassificationStore();
-  const [questions, setQuestions] = useState<ReflectionQuestion[]>([]);
-  const [answers, setAnswers] = useState<Record<number, string>>({});
-  const [loaded, setLoaded] = useState(false);
-
-  const loadQuestions = async () => {
-    try {
-      let qs: ReflectionQuestion[] | null = null;
-      try { qs = await getReflectionQuestions(store.sessionId!); } catch {}
-      if (!qs || qs.length === 0) {
-        try { const generated = await generateReflectionQuestions(store.sessionId!); qs = generated.questions || []; } catch {}
-      }
-      if (qs && qs.length > 0) {
-        setQuestions(qs);
-        const am: Record<number, string> = {};
-        for (const q of qs) { if (q.student_answer) am[q.id] = q.student_answer; }
-        setAnswers(am);
-        const storeAnswers: Record<number, string> = {}; qs.forEach((q, i) => { storeAnswers[i] = q.student_answer || ""; }); store.set({ reflectionAnswers: storeAnswers });
-      }
-    } catch {
-      setQuestions(REFLECTION_QUESTIONS.map((q, i) => ({ id: -i - 1, session_id: store.sessionId!, question_text: q, category: "general", category_label: "通用", sort_order: i, is_selected: true, student_answer: store.reflectionAnswers[i] || "", ai_feedback: "", created_at: "" })));
-    }
-    setLoaded(true);
-  };
-  useEffect(() => { loadQuestions(); }, []);
-
-  const handleBlur = async (qid: number, text: string) => {
-    if (!text.trim()) return;
-    const storeAnswers: Record<number, string> = {}; questions.forEach((q, i) => { storeAnswers[i] = q.id === qid ? text : (qid < 0 ? store.reflectionAnswers[-(qid + 1)] || "" : answers[q.id] || ""); }); store.set({ reflectionAnswers: storeAnswers });
-    if (qid > 0) { try { await saveReflectionAnswer(qid, text); } catch {} }
-  };
-
-  const allAnswered = questions.length > 0 && questions.every((q) => { const a = q.id < 0 ? store.reflectionAnswers[-(q.id + 1)] : answers[q.id]; return a?.trim(); });
-
   return (
-    <StageContainer step={7} title="反思与改进" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("RESULT_ANALYZED")}>← 上一步</button><button className="btn-primary" onClick={() => store.setStage("REPORT_GENERATED")} disabled={!allAnswered}>完成反思 → 生成报告</button></div>}>
-      {!loaded && <div className="card text-center py-8"><p className="text-gray-400">正在生成反思问题...</p></div>}
-      {questions.map((q, i) => {
-        const qid = q.id; const ans = qid < 0 ? (store.reflectionAnswers[-(qid + 1)] || "") : (answers[qid] || "");
-        return (
-          <div key={qid} className="card">
-            <h3 className="font-semibold text-gray-700 text-sm mb-2">{i + 1}. {q.question_text}</h3>
-            <textarea className="w-full p-3 border rounded-lg text-sm resize-y focus:outline-none focus:ring-2 focus:ring-gray-300" rows={3} placeholder="写下你的想法，或点击下方模版快速填写..." value={ans}
-              onChange={(e) => { if (qid < 0) store.set({ reflectionAnswers: { ...store.reflectionAnswers, [-(qid + 1)]: e.target.value } }); else setAnswers((a) => ({ ...a, [qid]: e.target.value })); }}
-              onBlur={(e) => handleBlur(qid, e.target.value)} />
-            {q.template_answers && q.template_answers.length > 0 && (
-              <div className="mt-2 space-y-1">
-                <p className="text-[10px] text-gray-400">📝 参考模版（点击填充）：</p>
-                {q.template_answers.map((t: any, j: number) => {
-                  const isActive = ans === t.text;
-                  return (<button key={j} onClick={() => { if (qid < 0) store.set({ reflectionAnswers: { ...store.reflectionAnswers, [-(qid + 1)]: t.text } }); else { setAnswers((a) => ({ ...a, [qid]: t.text })); handleBlur(qid, t.text); } }}
-                    className={`w-full text-left px-2.5 py-1.5 rounded text-[11px] leading-relaxed transition-all ${isActive ? "bg-blue-50 border border-blue-300" : "bg-gray-50 text-gray-500 hover:bg-blue-50/50 border border-gray-100"}`}>
-                    {t.text.length > 80 ? t.text.slice(0, 80) + "…" : t.text}</button>);
-                })}</div>)}
-          </div>
-        );
-      })}
-    </StageContainer>
+    <ReflectionStage
+      sessionId={store.sessionId!}
+      taskId={store.taskId}
+      reflectionAnswers={store.reflectionAnswers}
+      onChange={(a) => store.set({ reflectionAnswers: a })}
+      fallbackQuestions={REFLECTION_QUESTIONS}
+      onQuestions={(qs) => store.set({ reflectionQuestions: qs })}
+      onBack={() => store.setStage("RESULT_ANALYZED")}
+      onNext={() => store.setStage("REPORT_GENERATED")}
+      step={7}
+    />
   );
 }
 
@@ -589,7 +543,8 @@ function classifyFallback(input: string): string[] {
 }
 
 function buildClassifyReport(store: ReturnType<typeof useClassificationStore.getState>): string {
-  const reflectionText = REFLECTION_QUESTIONS.map((q, i) => `**${q}**\n\n${store.reflectionAnswers[i] || "（待补充）"}`).join("\n\n");
+  const refQs = store.reflectionQuestions.length > 0 ? store.reflectionQuestions : REFLECTION_QUESTIONS;
+  const reflectionText = refQs.map((q, i) => `**${q}**\n\n${store.reflectionAnswers[i] || "（待补充）"}`).join("\n\n");
   const summary = store.experimentResult ? Object.entries(store.experimentResult.summary).map(([a, s]: any) => `| ${a} | ${(s.avg_accuracy * 100).toFixed(0)}% | ${(s.avg_precision * 100).toFixed(0)}% | ${(s.avg_recall * 100).toFixed(0)}% | ${(s.avg_f1 * 100).toFixed(0)}% |`).join("\n") : "| - | - | - | - | - |";
   return [`# 图像分类算法比较研究`, ``, `## 1. 研究问题`, ``, store.refinedQuestion || store.rawQuestion || "（待补充）", ``, `## 2. 我的假设`, ``, store.hypothesis || "（待补充）", ``, `## 3. 实验设计`, ``, `- 对比分类器：${store.selectedClassifiers.join("、")}`, `- 数据量：${store.nSamples} 个点`, `- 噪声水平：${(store.noiseLevels[0] * 100).toFixed(0)}%`, `- 数据分布：${store.patterns.join("、")}`, `- 重复次数：${store.numTrials} 次`, `- K 值：${store.kValue}，最大深度：${store.maxDepth === 99 ? "不限" : String(store.maxDepth)}`, ``, `## 4. 实验结果`, ``, `| 分类器 | 准确率 | 精确率 | 召回率 | F1 |`, `|---|---:|---:|---:|---:|`, summary, ``, `## 5. 结果分析`, ``, store.studentAnalysis || "（待补充）", ``, `## 6. 反思与改进`, ``, reflectionText, ``, `## 7. 总结`, ``, `（待补充）`].join("\n");
 }

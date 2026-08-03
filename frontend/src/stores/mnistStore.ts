@@ -46,9 +46,10 @@ export interface MNISTWorkflowData {
   /** 产生当前结果时的配置指纹。进入 Stage3 时对比，相同则复用缓存。 */
   resultFingerprint: string;
 
-  // 分析 + 报告
+  // 分析 + 反思 + 报告
   studentAnalysis: string;
   reflectionAnswers: Record<number, string>;
+  reflectionQuestions: string[];
   aiAnalysis: { summary: string; key_findings: string[]; questions_for_student: string[] } | null;
   reportMarkdown: string;
 
@@ -76,7 +77,7 @@ const defaults = (): MNISTWorkflowData => ({
   maxTestSamples: 5000,
   trainingCurve: [], currentEpoch: 0, totalEpochs: 0, isTraining: false,
   experimentResult: null, resultFingerprint: "",
-  studentAnalysis: "", reflectionAnswers: {},
+  studentAnalysis: "", reflectionAnswers: {}, reflectionQuestions: [],
   aiAnalysis: null, reportMarkdown: "",
   uploadInference: null, trainingCompletedAt: 0,
 });

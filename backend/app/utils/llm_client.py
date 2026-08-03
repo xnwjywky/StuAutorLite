@@ -29,6 +29,8 @@ class LLMClient:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.provider = provider
+        # 最近一次成功请求的 token 用量（{"prompt_tokens","completion_tokens","total_tokens"}）
+        self.last_usage: dict | None = None
 
         if provider == "anthropic":
             self.endpoint = f"{self.base_url}/v1/messages"
@@ -102,6 +104,25 @@ class LLMClient:
             raise RuntimeError(msg) from e
 
         data = resp.json()
+
+        # ── 解析 token 用量（统一为 prompt/completion/total 三个字段）──
+        # OpenAI 协议: usage.prompt_tokens / usage.completion_tokens / usage.total_tokens
+        # Anthropic 协议: usage.input_tokens / usage.output_tokens
+        usage = data.get("usage") or {}
+        if self.provider == "anthropic":
+            prompt = int(usage.get("input_tokens") or 0)
+            completion = int(usage.get("output_tokens") or 0)
+        else:
+            prompt = int(usage.get("prompt_tokens") or 0)
+            completion = int(usage.get("completion_tokens") or 0)
+        self.last_usage = {
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": int(usage.get("total_tokens") or (prompt + completion)),
+        }
+        if not self.last_usage["total_tokens"]:
+            self.last_usage = None  # 未返回用量信息
+
         # Anthropic 响应 → 统一转成 OpenAI choices 格式
         if self.provider == "anthropic":
             content = ""

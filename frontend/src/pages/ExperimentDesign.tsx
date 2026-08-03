@@ -16,7 +16,7 @@ const ALGOS: { key: AlgorithmType; name: string; description: string; pros: stri
 
 export default function ExperimentDesign() {
   const navigate = useNavigate();
-  const [selected, setSelected] = useState<Set<AlgorithmType>>(new Set(["BFS", "A*"]));
+  const [selected, setSelected] = useState<Set<AlgorithmType>>(new Set());
 
   const toggle = (k: AlgorithmType) => {
     setSelected((prev) => {

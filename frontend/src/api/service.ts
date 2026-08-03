@@ -161,6 +161,14 @@ export function hasAgentConfig(): boolean {
   try { const raw = localStorage.getItem("stuautor_agent_configs"); return !!raw && JSON.parse(raw).some((c: any) => c.apiKey); } catch { return false; }
 }
 
+/** Token 使用量统计（累计 LLM 调用消耗） */
+export async function getTokenUsage(): Promise<{
+  prompt_tokens: number; completion_tokens: number; total_tokens: number;
+  calls: number; model: string; since: number | null;
+}> {
+  return apiClient.get("/api/agents/usage") as Promise<any>;
+}
+
 // ── 反思问题 ────────────────────────────────────────────
 export interface ReflectionQuestion {
   id: number; session_id: number; question_text: string;
@@ -171,12 +179,13 @@ export interface ReflectionQuestion {
   created_at: string;
 }
 
-export async function generateReflectionQuestions(sessionId: number): Promise<{ questions: ReflectionQuestion[]; total: number }> {
-  return apiClient.post("/api/reflection/generate", { session_id: sessionId }) as Promise<any>;
+export async function generateReflectionQuestions(sessionId: number, taskId?: string): Promise<{ questions: ReflectionQuestion[]; total: number }> {
+  return apiClient.post("/api/reflection/generate", { session_id: sessionId, task_id: taskId }) as Promise<any>;
 }
 
-export async function getReflectionQuestions(sessionId: number): Promise<ReflectionQuestion[]> {
-  return apiClient.get(`/api/reflection/questions?session_id=${sessionId}`) as Promise<ReflectionQuestion[]>;
+export async function getReflectionQuestions(sessionId: number, taskId?: string): Promise<ReflectionQuestion[]> {
+  const task = taskId ? `&task_id=${encodeURIComponent(taskId)}` : "";
+  return apiClient.get(`/api/reflection/questions?session_id=${sessionId}${task}`) as Promise<ReflectionQuestion[]>;
 }
 
 export async function saveReflectionAnswer(questionId: number, studentAnswer: string): Promise<ReflectionQuestion> {

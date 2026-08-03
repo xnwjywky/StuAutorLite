@@ -29,7 +29,11 @@ export interface GuessWorkflowData {
   studentAnalysis: string;
   aiAnalysis: { summary: string; key_findings: string[]; questions_for_student: string[] } | null;
 
-  // Stage 7 — 总结
+  // Stage 7 — 反思改进
+  reflectionAnswers: Record<number, string>;
+  reflectionQuestions: string[];
+
+  // Stage 8 — 总结
   reportMarkdown: string;
 }
 
@@ -41,6 +45,7 @@ const defaults = (): GuessWorkflowData => ({
   numberLow: 1, numberHigh: 100, numTrials: 5, designCompleted: false,
   experimentResult: null, selectedTrial: 1,
   studentAnalysis: "", aiAnalysis: null,
+  reflectionAnswers: {}, reflectionQuestions: [],
   reportMarkdown: "",
 });
 

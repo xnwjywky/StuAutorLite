@@ -14,14 +14,13 @@ import StageContainer from "../components/StageContainer";
 import MazeVisualizer from "../components/MazeVisualizer";
 import ChartPanel from "../components/ChartPanel";
 import AlgorithmCard, { ALGO_INFO } from "../components/AlgorithmCard";
+import ReflectionStage from "../components/ReflectionStage";
 import { useWorkflowStore } from "../stores/workflowStore";
 import {
   saveQuestion,
   runExperiment, analyzeResults, saveAnalysis,
   callMentor, callDataAnalyst, callReviewer, callGeneralLLM,
   hasAgentConfig, logAgentError,
-  generateReflectionQuestions, getReflectionQuestions, saveReflectionAnswer,
-  type ReflectionQuestion,
 } from "../api/service";
 import { archiveSession } from "./Archive";
 import { renderMarkdown } from "../utils/markdown";
@@ -47,11 +46,11 @@ const QUESTION_TEMPLATES = [
   "增加障碍物会对哪些算法影响最大？",
 ];
 const REFLECTION_QUESTIONS = [
-  "你的结果是否支持最初假设？为什么？",
-  "哪个算法表现最好？哪个最不稳定？",
-  "有没有出现意外结果？你如何解释？",
-  "如果重新设计实验，你会怎么改？",
-  "你的实验有什么局限（例如迷宫太小、次数太少）？",
+  "哪种算法找到的路径最短？哪种搜索的节点最少？",
+  "为什么 A* 通常比 BFS 搜索更快？",
+  "迷宫越大或障碍物越多，哪种算法最受影响？",
+  "随机算法成功率低，这能说明其他算法更有价值吗？",
+  "通过这次实验，你对科学研究的过程有什么新的理解？",
 ];
 const ALGORITHMS: { key: AlgorithmType; name: string; description: string; pros: string[]; cons: string[] }[] = [
   { key: "BFS", name: "BFS", description: "一层一层找，通常能找到最短路径", pros: ["保证最短路径","结果稳定"], cons: ["搜索节点较多","大迷宫较慢"] },
@@ -540,162 +539,18 @@ function Stage6() {
 // ═══════ Stage 7 — Reflection：题库 + 回答 + AI 反思反馈 ═══════
 function Stage7() {
   const store = useWorkflowStore();
-  const [questions, setQuestions] = useState<ReflectionQuestion[]>([]);
-  const [answers, setAnswers] = useState<Record<number, string>>({});
-  const [, setFeedbacks] = useState<Record<number, string>>({});
-  const [savingIds, setSavingIds] = useState<Set<number>>(new Set());
-  const [loaded, setLoaded] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-
-  // 加载问题
-  const loadQuestions = async () => {
-    try {
-      let qs: ReflectionQuestion[] | null = null;
-      try { qs = await getReflectionQuestions(store.sessionId!); } catch { /* API 不可用 */ }
-      if (!qs || qs.length === 0) {
-        try {
-          const generated = await generateReflectionQuestions(store.sessionId!);
-          qs = generated.questions || [];
-        } catch { /* 降级 */ }
-      }
-      if (qs && qs.length > 0) {
-        setQuestions(qs);
-        const am: Record<number, string> = {}; const fm: Record<number, string> = {};
-        for (const q of qs) { if (q.student_answer) am[q.id] = q.student_answer; if (q.ai_feedback) fm[q.id] = q.ai_feedback; }
-        setAnswers(am); setFeedbacks(fm);
-        const storeAnswers: Record<number, string> = {};
-        qs.forEach((q, i) => { storeAnswers[i] = q.student_answer || ""; });
-        store.set({ reflectionAnswers: storeAnswers });
-      }
-    } catch {
-      // 降级为本地模板
-      setQuestions(REFLECTION_QUESTIONS.map((q, i) => ({
-        id: -i - 1, session_id: store.sessionId!, question_text: q,
-        category: "general", category_label: "通用", sort_order: i,
-        is_selected: true, student_answer: store.reflectionAnswers[i] || "", ai_feedback: "", created_at: "",
-      })));
-    }
-    setLoaded(true);
-  };
-
-  useEffect(() => { loadQuestions(); }, []);
-
-  // 失焦时保存回答 + 获取 AI 反馈
-  const handleBlur = async (qid: number, text: string) => {
-    if (!text.trim()) return;
-    setSavingIds((s) => new Set([...s, qid]));
-    // 同步到 store
-    const storeAnswers: Record<number, string> = {};
-    questions.forEach((q, i) => { storeAnswers[i] = q.id === qid ? text : (qid < 0 ? store.reflectionAnswers[-(qid + 1)] || "" : answers[q.id] || ""); });
-    store.set({ reflectionAnswers: storeAnswers });
-
-    if (qid > 0) {
-      // 有真实 DB ID：通过后端保存 + 获取 AI 反馈
-      try {
-        const updated = await saveReflectionAnswer(qid, text);
-        setFeedbacks((f) => ({ ...f, [qid]: updated.ai_feedback || "" }));
-      } catch {
-        // API 调用失败，不显示反馈
-      }
-    } else {
-      // 降级模式（qid < 0）：无后端，不生成反馈
-    }
-    setSavingIds((s) => { const ns = new Set(s); ns.delete(qid); return ns; });
-  };
-
-  const allAnswered = questions.length > 0 && questions.every((q) => {
-    const a = q.id < 0 ? store.reflectionAnswers[-(q.id + 1)] : answers[q.id];
-    return a?.trim();
-  });
-
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    try {
-      const generated = await generateReflectionQuestions(store.sessionId!);
-      if (generated.questions?.length > 0) {
-        setQuestions(generated.questions);
-        setAnswers({}); setFeedbacks({});
-      }
-    } catch {
-      // 本地降级：随机打乱
-      const shuffled = [...REFLECTION_QUESTIONS].sort(() => Math.random() - 0.5);
-      setQuestions(shuffled.map((q, i) => ({
-        id: -i - 1, session_id: store.sessionId!, question_text: q,
-        category: "general", category_label: "通用", sort_order: i,
-        is_selected: true, student_answer: "", ai_feedback: "", created_at: "",
-      })));
-      setAnswers({}); setFeedbacks({});
-    }
-    setRefreshing(false);
-  };
-
   return (
-    <StageContainer step={5} title="反思与改进" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("RESULT_ANALYZED")}>← 上一步</button><button className="btn-primary" onClick={() => store.setStage("REPORT_GENERATED")} disabled={!allAnswered}>完成反思 → 生成报告</button></div>}>
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-500">回顾研究过程，回答以下问题。回答后 AI 会给出启发式反馈。</p>
-        <button className="btn-secondary text-xs" onClick={handleRefresh} disabled={refreshing}>{refreshing ? "生成中..." : "🔄 换一组问题"}</button>
-      </div>
-
-      {!loaded && <div className="card text-center py-8"><p className="text-gray-400">正在生成反思问题...</p></div>}
-
-      {questions.map((q, i) => {
-        const qid = q.id;
-        const ans = qid < 0 ? (store.reflectionAnswers[-(qid + 1)] || "") : (answers[qid] || "");
-        const saving = savingIds.has(qid);
-        return (
-          <div key={qid} className="card">
-            <div className="flex items-start gap-2 mb-2">
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 flex-shrink-0">{q.category_label || "通用"}</span>
-              <h3 className="font-semibold text-gray-700 text-sm">{i + 1}. {q.question_text}</h3>
-            </div>
-            <textarea
-              className="w-full p-3 border rounded-lg text-sm resize-y focus:outline-none focus:ring-2 focus:ring-gray-300"
-              rows={3}
-              placeholder="写下你的想法，或点击下方模版快速填写..."
-              value={ans}
-              onChange={(e) => {
-                if (qid < 0) {
-                  store.set({ reflectionAnswers: { ...store.reflectionAnswers, [-(qid + 1)]: e.target.value } });
-                } else {
-                  setAnswers((a) => ({ ...a, [qid]: e.target.value }));
-                }
-              }}
-              onBlur={(e) => handleBlur(qid, e.target.value)}
-            />
-            {/* 模板回答按钮 */}
-            {q.template_answers && q.template_answers.length > 0 && (
-              <div className="mt-2 space-y-1">
-                <p className="text-[10px] text-gray-400">📝 参考模版（点击填充，含科研能力评分）：</p>
-                {q.template_answers.map((t: any, j: number) => {
-                  const isActive = ans === t.text;
-                  return (
-                    <button key={j}
-                      onClick={() => {
-                        if (qid < 0) {
-                          store.set({ reflectionAnswers: { ...store.reflectionAnswers, [-(qid + 1)]: t.text } });
-                        } else {
-                          setAnswers((a) => ({ ...a, [qid]: t.text }));
-                          handleBlur(qid, t.text);
-                        }
-                      }}
-                      className={`w-full text-left px-2.5 py-1.5 rounded text-[11px] leading-relaxed transition-all ${isActive ? "bg-blue-50 border border-blue-300" : "bg-gray-50 text-gray-500 hover:bg-blue-50/50 border border-gray-100"}`}>
-                      {t.text.length > 80 ? t.text.slice(0, 80) + "…" : t.text}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            {saving && <p className="text-xs text-gray-400 mt-1 flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 border border-blue-400 border-t-transparent rounded-full animate-spin" />处理中...</p>}
-          </div>
-        );
-      })}
-
-      {loaded && allAnswered && (
-        <div className="card border-green-200 bg-green-50/30">
-          <p className="text-sm text-green-700">✓ 所有反思问题已回答，可以进入下一步生成研究报告。</p>
-        </div>
-      )}
-    </StageContainer>
+    <ReflectionStage
+      sessionId={store.sessionId!}
+      taskId={store.taskId}
+      reflectionAnswers={store.reflectionAnswers}
+      onChange={(a) => store.set({ reflectionAnswers: a })}
+      fallbackQuestions={REFLECTION_QUESTIONS}
+      onQuestions={(qs) => store.set({ reflectionQuestions: qs })}
+      onBack={() => store.setStage("RESULT_ANALYZED")}
+      onNext={() => store.setStage("REPORT_GENERATED")}
+      step={5}
+    />
   );
 }
 
@@ -880,7 +735,8 @@ function suggestFallback(input: string): string[] {
 }
 function pickAlgo(s: string): string { for (const a of ["A*","BFS","DFS","Random"]) if (s.includes(a)) return a; return "A*"; }
 function buildReportMd(store: ReturnType<typeof useWorkflowStore.getState>): string {
-  const reflectionText = REFLECTION_QUESTIONS.map((q, i) => `**${q}**\n\n${store.reflectionAnswers[i] || "（待补充）"}`).join("\n\n");
+  const refQs = store.reflectionQuestions.length > 0 ? store.reflectionQuestions : REFLECTION_QUESTIONS;
+  const reflectionText = refQs.map((q, i) => `**${q}**\n\n${store.reflectionAnswers[i] || "（待补充）"}`).join("\n\n");
   const algoSummary = store.experimentResult ? Object.entries(store.experimentResult.summary).map(([a, s]: any) => `| ${a} | ${(s.success_rate * 100).toFixed(0)}% | ${s.avg_path_length ?? "-"} | ${s.avg_expanded_nodes} | ${s.avg_runtime_ms}ms |`).join("\n") : "| - | - | - | - | - |";
   return [`# 迷宫寻路算法比较研究`, ``, `## 1. 研究问题`, ``, store.refinedQuestion || store.rawQuestion || "（待补充）", ``, `## 2. 我的假设`, ``, store.hypothesis || "（待补充）", ``, `## 3. 实验设计`, ``, `- 对比算法：${store.selectedAlgorithms.join("、")}`, `- 迷宫大小：${store.mazeSize[0]}×${store.mazeSize[1]}`, `- 障碍物比例：${store.obstacleRatios.map((r) => (r * 100).toFixed(0) + "%").join("、")}`, `- 每组重复：${store.numTrials} 次`, `- 评价指标：${store.selectedMetrics.join("、")}`, ``, `## 4. 实验结果`, ``, `| 算法 | 成功率 | 平均路径长度 | 平均搜索节点 | 平均运行时间 |`, `|---|---:|---:|---:|---:|`, algoSummary, ``, `## 5. 结果分析`, ``, store.studentAnalysis || "（待补充）", ``, `## 6. 反思与改进`, ``, reflectionText, ``, `## 7. 总结`, ``, `（待补充）`].join("\n");
 }

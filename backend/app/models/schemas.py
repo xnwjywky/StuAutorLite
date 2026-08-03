@@ -169,6 +169,8 @@ class ReviewResponse(BaseModel):
 # ── 反思问题 ─────────────────────────────────────────────
 class ReflectionQuestionCreate(BaseModel):
     session_id: int
+    # 显式指定实验类型（前端 demo 会话没有真实 session，DB 查不到 task_id）
+    task_id: str | None = None
 
 class ReflectionAnswerSave(BaseModel):
     student_answer: str = ""

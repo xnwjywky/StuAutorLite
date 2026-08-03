@@ -1,5 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { useBackendHealth } from "../hooks/useBackendHealth";
+import TokenUsageBadge from "./TokenUsageBadge";
 
 const NAV_ITEMS = [
   { path: "/", label: "发现" },
@@ -53,6 +54,7 @@ export default function Layout({ children }: LayoutProps) {
           </nav>
 
           {/* 右侧配置入口 */}
+          <TokenUsageBadge />
           <Link
             to="/agent-config"
             className={`shrink-0 px-3 py-1.5 rounded-full text-sm transition-colors ml-2 ${

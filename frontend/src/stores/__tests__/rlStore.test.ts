@@ -11,7 +11,7 @@ describe("rlStore", () => {
     expect(s.sessionId).toBe(1);
     expect(s.taskId).toBe("rl_gridworld");
     expect(s.currentStage).toBe("TASK_SELECTED");
-    expect(s.selectedAgents).toEqual(["Q_LEARNING", "SARSA"]);
+    expect(s.selectedAgents).toEqual([]);
     expect(s.gridSize).toBe(8);
     expect(s.numTraps).toBe(3);
     expect(s.numEpisodes).toBe(2000);
@@ -52,7 +52,7 @@ describe("rlStore", () => {
     useRLStore.getState().set({ selectedAgents: ["Q_LEARNING"], gridSize: 12 });
     useRLStore.getState().reset();
     expect(useRLStore.getState().sessionId).toBeNull();
-    expect(useRLStore.getState().selectedAgents).toEqual(["Q_LEARNING", "SARSA"]);
+    expect(useRLStore.getState().selectedAgents).toEqual([]);
     expect(useRLStore.getState().gridSize).toBe(8);
   });
 

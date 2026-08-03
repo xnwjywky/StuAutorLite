@@ -8,9 +8,11 @@ import Layout from "../components/Layout";
 import FlowStepper from "../components/FlowStepper";
 import StageContainer from "../components/StageContainer";
 import ChartPanel from "../components/ChartPanel";
+import AlgorithmCard from "../components/AlgorithmCard";
+import ReflectionStage from "../components/ReflectionStage";
 import RLGridVisualizer, { ComparePath } from "../components/RLGridVisualizer";
 import { useRLStore } from "../stores/rlStore";
-import { callMentor, callDataAnalyst, hasAgentConfig, logAgentError } from "../api/service";
+import { callMentor, callDataAnalyst, saveAnalysis, hasAgentConfig, logAgentError } from "../api/service";
 import { detectBaseUrl } from "../api/client";
 import { archiveSession } from "./Archive";
 import { renderMarkdown } from "../utils/markdown";
@@ -21,7 +23,16 @@ const STEPS: { key: ResearchStage; label: string }[] = [
   { key: "EXPERIMENT_DESIGNED", label: "设计实验" },
   { key: "EXPERIMENT_RUNNING",  label: "运行实验" },
   { key: "RESULT_ANALYZED",     label: "分析结果" },
+  { key: "REFLECTION_COMPLETED",label: "反思改进" },
   { key: "REPORT_GENERATED",    label: "总结报告" },
+];
+
+const REFLECTION_FALLBACK = [
+  "Q-learning 和 SARSA 谁的成功率更高？谁更稳定？",
+  "ε 变大时探索更多，成功率会怎样变化？",
+  "陷阱越多，哪种算法更容易掉进去？为什么？",
+  "α/γ 的选择对收敛速度影响大吗？",
+  "通过这次实验，你对强化学习有什么新的理解？",
 ];
 
 const QUESTION_TEMPLATES = [
@@ -107,9 +118,28 @@ function StageRouter() {
   const stage = useRLStore((s) => s.currentStage);
   switch (stage) {
     case "EXPERIMENT_DESIGNED": return <Stage2 />; case "EXPERIMENT_RUNNING": return <Stage3 />;
-    case "RESULT_ANALYZED": return <Stage4 />; case "REPORT_GENERATED": return <Stage5 />;
+    case "RESULT_ANALYZED": return <Stage4 />; case "REFLECTION_COMPLETED": return <ReflectionView />;
+    case "REPORT_GENERATED": return <Stage5 />;
     default: return <Stage1 />;
   }
+}
+
+// ═══════ 反思与改进 ═══════
+function ReflectionView() {
+  const store = useRLStore();
+  return (
+    <ReflectionStage
+      sessionId={store.sessionId!}
+      taskId={store.taskId}
+      reflectionAnswers={store.reflectionAnswers}
+      onChange={(a) => store.set({ reflectionAnswers: a })}
+      fallbackQuestions={REFLECTION_FALLBACK}
+      onQuestions={(qs) => store.set({ reflectionQuestions: qs })}
+      onBack={() => store.setStage("RESULT_ANALYZED")}
+      onNext={() => store.setStage("REPORT_GENERATED")}
+      step={5}
+    />
+  );
 }
 
 // ═══════ Stage1 ═══════
@@ -174,9 +204,7 @@ function Stage2() {
       <div className="card"><h2 className="font-semibold text-gray-700 mb-3">我要比较的算法 {store.selectedAgents.length === 0 && <span className="text-xs font-normal text-gray-400">（请至少选一个）</span>}</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {AGENT_LIST.map(a => (
-            <button key={a.key} onClick={() => toggle(a)} className={`text-left px-4 py-3 rounded-lg text-sm border transition-all ${store.selectedAgents.includes(a.key) ? "border-gray-900 bg-gray-900 text-white" : "border-gray-200 bg-white text-gray-600 hover:border-gray-400"}`}>
-              <div className="font-semibold">{a.name}</div><div className="text-xs opacity-70 mt-0.5">{a.desc}</div>
-            </button>
+            <AlgorithmCard key={a.key} name={a.name} description={a.desc} selected={store.selectedAgents.includes(a.key)} onToggle={() => toggle(a)} />
           ))}
         </div>
       </div>
@@ -451,9 +479,10 @@ function Stage4() {
     store.set({ aiAnalysis: r.ok ? r.data as any : { summary: "Q-learning 通常收敛更快，SARSA 在陷阱多时更安全。", key_findings: [], questions_for_student: ["哪种算法成功率更高？为什么？"] } });
     if (!r.ok) setMsg({ text: r.error, ok: false }); setAnalyzing(false);
   };
+  const handleSave = async () => { try { await saveAnalysis(store.sessionId!, store.studentAnalysis); } catch {} };
 
   return (
-    <StageContainer step={4} title="分析结果" agent={msg} actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("EXPERIMENT_RUNNING")}>← 上一步</button><button className="btn-primary" onClick={() => store.setStage("REPORT_GENERATED")} disabled={!store.studentAnalysis.trim()}>保存 → 总结报告</button></div>}>
+    <StageContainer step={4} title="分析结果" agent={msg} actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("EXPERIMENT_RUNNING")}>← 上一步</button><button className="btn-primary" onClick={() => { handleSave(); store.setStage("REFLECTION_COMPLETED"); }} disabled={!store.studentAnalysis.trim()}>保存 → 反思改进</button></div>}>
       {store.experimentResult && (
         <ChartPanel data={Object.entries(store.experimentResult.summary).map(([a, s]: any) => ({ agent: a, success: +(s.avg_success_rate * 100).toFixed(0), reward: s.avg_reward }))}
           xKey="agent" bars={[{ key: "success", name: "成功率 (%)", color: "#3b82f6" }, { key: "reward", name: "平均奖励", color: "#22c55e" }]} />
@@ -514,6 +543,8 @@ function Stage5() {
 
   if (!store.reportMarkdown) {
     const summary = result ? Object.entries(result.summary).map(([a, s]: any) => `| ${AGENT_LIST.find(x => x.key === a)?.name || a} | ${(s.avg_success_rate * 100).toFixed(0)}% | ${s.avg_reward} |`).join("\n") : "| - | - | - |";
+    const refQs = store.reflectionQuestions.length > 0 ? store.reflectionQuestions : REFLECTION_FALLBACK;
+    const reflectionText = refQs.map((q, i) => `**${q}**\n\n${store.reflectionAnswers[i] || "（待补充）"}`).join("\n\n");
     store.set({ reportMarkdown: [
       "# 强化学习格子世界 — 机器人找金币研究", "", "## 1. 研究问题", store.refinedQuestion || store.rawQuestion, "",
       "## 2. 我的假设", store.hypothesis, "", "## 3. 实验设计",
@@ -522,12 +553,12 @@ function Stage5() {
       `- 折扣因子：${store.discount}，探索率：${store.epsilon}`,
       `- 重复：${store.numTrials} 次`, "",
       "## 4. 实验结果", "| 算法 | 成功率 | 平均奖励 |", "|---|---|---|", summary, "",
-      "## 5. 我的分析", store.studentAnalysis, "", "## 6. 总结",
+      "## 5. 我的分析", store.studentAnalysis, "", "## 6. 反思与改进", reflectionText, "", "## 7. 总结",
     ].join("\n") });
   }
 
   return (
-    <StageContainer step={5} title="总结报告" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("RESULT_ANALYZED")}>← 上一步</button><button className="btn-primary" onClick={() => { archiveSession({ sessionId: store.sessionId, taskId: store.taskId, question: store.refinedQuestion || store.rawQuestion, hypothesis: store.hypothesis, algorithms: store.selectedAgents, summary: result?.summary || null, analysis: store.studentAnalysis, reflection: {}, report: store.reportMarkdown, review: {} }); navigate("/archive"); }}>完成 → 档案</button></div>}>
+    <StageContainer step={6} title="总结报告" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("REFLECTION_COMPLETED")}>← 上一步</button><button className="btn-primary" onClick={() => { archiveSession({ sessionId: store.sessionId, taskId: store.taskId, question: store.refinedQuestion || store.rawQuestion, hypothesis: store.hypothesis, algorithms: store.selectedAgents, summary: result?.summary || null, analysis: store.studentAnalysis, reflection: store.reflectionAnswers, report: store.reportMarkdown, review: {} }); navigate("/archive"); }}>完成 → 档案</button></div>}>
       <div className="card"><div className="flex gap-2 mb-4"><button className={`btn-secondary text-sm ${!preview ? "bg-gray-300" : ""}`} onClick={() => setPreview(false)}>编辑</button><button className={`btn-secondary text-sm ${preview ? "bg-gray-300" : ""}`} onClick={() => setPreview(true)}>预览</button></div>
         {preview ? <div className="min-h-[300px] border rounded-lg p-4 bg-white">{renderMarkdown(store.reportMarkdown)}</div> : <textarea className="w-full min-h-[300px] p-4 border rounded-lg font-mono text-sm resize-y" value={store.reportMarkdown} onChange={e => store.set({ reportMarkdown: e.target.value })} />}
       </div>

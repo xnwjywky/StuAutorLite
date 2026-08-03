@@ -3,93 +3,104 @@
 import json
 import random
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session as DbSession
 from app.models.database import get_db, ReflectionQuestion, Session as SessionModel
 from app.models.schemas import ReflectionQuestionCreate, ReflectionAnswerSave
+from app.api.routes.reflection_content import EXPERIMENT_CONFIGS, COMMON_QUESTIONS, COMMON_TEMPLATES
 
 router = APIRouter(prefix="/reflection", tags=["reflection"])
 
-# 大题库（按类别分类），每类 5-8 题，共 ~25 题
-QUESTION_POOL: dict[str, list[str]] = {
-    "hypothesis": [
-        "你的实验结果是否支持最初假设？哪些数据支持，哪些数据不支持？",
-        "如果你的假设被推翻了，你觉得最可能的原因是什么？",
-        "回顾你的假设 — 如果重新写一次，你会怎么修改？为什么？",
-        "你的假设是基于什么理由提出的？直觉、经验还是已有知识？",
-        "实验中是否有超出你预期的情况？它们对你的假设有什么影响？",
-    ],
-    "data": [
-        "对比所有算法的数据，哪个指标最让你惊讶？",
-        "数据中有没有异常值或波动很大的结果？你认为为什么会这样？",
-        "你的实验重复次数够多吗？如果增加重复次数，你预期数据会怎样变化？",
-        "如果只看成功率的数字，哪个算法最可靠？为什么？",
-        "实验数据中各个算法在路径长度和搜索节点数之间有没有明显的 trade-off？",
-        "如果你要向没做过实验的同学展示结果，你会选哪张图表？用它说明什么？",
-    ],
-    "method": [
-        "你的实验设计中，哪个变量影响最大？有没有你忽略了的变量？",
-        "如果换一种迷宫生成方式（比如用 DFS 挖迷宫而不是随机放墙），结果会一样吗？",
-        "你选择的障碍物比例范围是否足够？极端情况（0% 或 60%）会怎样？",
-        "实验中每个算法是否都在完全相同的条件下测试？有没有不公平的地方？",
-        "如果只改变迷宫大小从 12×12 到 20×20，你最想看哪个算法的表现？",
-    ],
-    "limitation": [
-        "你认为这个实验最大的局限性是什么？哪些结论不能推广到其他迷宫？",
-        "实验结果是否适用于所有类型的迷宫，还是只适用于你测试的这种？",
-        '实验数据能证明"因果关系"吗，还是只能说明"相关性"？',
-        "有没有什么东西是你想在实验中测量但没有做到的？",
-        "你的实验使用了固定大小的迷宫 — 这里有什么局限？",
-    ],
-    "improvement": [
-        "如果重新设计这个实验，你最想改变什么？为什么？",
-        "下一个实验你想研究什么问题？可以从已有结果的缺口出发。",
-        "有没有其他算法（比如 Dijkstra、贪心搜索）你感兴趣也想测试的？",
-        "如果要做一个展示板向全班展示你的研究发现，你会重点呈现什么？",
-        '通过这次实验，你对"科学研究"这个过程有什么新的理解？',
-        "如果让你给一个还没开始做的同学提建议，你会说什么？",
-    ],
-}
+DEFAULT_TASK_ID = "maze_pathfinding"
+COMMON_CATEGORY = "common"
+# 实验独有问题：这 4 类各抽 1 题（覆盖效率/成功率/局限/优化等），通用问题放最后
+UNIQUE_CATEGORIES = ["hypothesis", "data", "limitation", "improvement"]
 
 CATEGORY_LABELS = {
     "hypothesis": "假设与验证",
     "data":       "数据分析",
     "method":     "实验方法",
     "limitation": "实验局限",
-    "improvement":"改进方向",
+    "improvement": "改进方向",
+    "general":    "通用",
+    "common":     "通用思考",
 }
+
+
+def _config_for_session(db: DbSession, session_id: int, task_id: str | None = None) -> tuple[dict, str | None, str]:
+    """取该实验的反思配置（题库+模板）。
+    返回 (config, mode, storage_key)：
+    - task_id 可为 "task_id" 或 "task_id:mode"（子实验，如 visual_algo_compare:sorting）
+    - storage_key 为存入 DB 的完整标识（含子模式），用于区分同一实验下的不同子实验
+    优先使用显式传入的 task_id（前端 demo 会话没有真实 session，DB 查不到），否则查 session 表。"""
+    if not task_id:
+        s = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+        if s and s.task_id:
+            task_id = s.task_id
+    task_id = task_id or DEFAULT_TASK_ID
+    base, _, mode = task_id.partition(":")
+    config = EXPERIMENT_CONFIGS.get(base) or EXPERIMENT_CONFIGS[DEFAULT_TASK_ID]
+    return config, (mode or None), task_id
+
+
+def _resolve_pools(config: dict, mode: str | None) -> tuple[dict, dict]:
+    """取该模式下的问题/模板池；无子模式或子模式无专属内容时用基础池。"""
+    if mode and mode in config.get("modes", {}):
+        m = config["modes"][mode]
+        return m.get("questions") or config["questions"], m.get("templates") or config["templates"]
+    return config["questions"], config["templates"]
 
 
 @router.post("/generate")
 def generate_questions(req: ReflectionQuestionCreate, db: DbSession = Depends(get_db)):
-    """为一个 session 生成反思问题：每类选 1 题，共 5 题，写入 DB"""
-    # 先清理旧题
+    """生成反思问题：4 道实验独有 + 1 道通用（放最后），写入 DB。
+    问题与模板回答按实验定制（task_id 显式传入优先，可带 :mode 区分子实验）。"""
+    config, mode, storage_key = _config_for_session(db, req.session_id, getattr(req, "task_id", None))
+    questions_pool, templates = _resolve_pools(config, mode)
+
+    # 只清理本实验（同 storage_key）的旧题，避免误删同一 demo 会话下其他实验的问题
     db.query(ReflectionQuestion).filter(
-        ReflectionQuestion.session_id == req.session_id
-    ).delete()
+        ReflectionQuestion.session_id == req.session_id,
+        or_(
+            ReflectionQuestion.task_id == storage_key,
+            ReflectionQuestion.task_id == "",
+            ReflectionQuestion.task_id.is_(None),
+        ),
+    ).delete(synchronize_session=False)
 
     rng = random.Random(req.session_id)
-    selected: list[ReflectionQuestion] = []
-    order = 0
+    to_write: list[tuple[str, str, list]] = []
 
-    for cat, questions in QUESTION_POOL.items():
-        if not questions:
+    # 1) 实验独有问题：4 类各抽 1 题
+    for cat in UNIQUE_CATEGORIES:
+        pool = questions_pool.get(cat) or []
+        if not pool:
             continue
-        chosen = rng.sample(questions, min(1, len(questions)))
-        for q in chosen:
-            rq = ReflectionQuestion(
-                session_id=req.session_id,
-                question_text=q,
-                category=cat,
-                sort_order=order,
-                is_selected=1,
-                template_answers=json.dumps(_gen_templates(q), ensure_ascii=False),
-            )
-            db.add(rq)
-            selected.append(rq)
-            order += 1
+        q = rng.sample(pool, min(1, len(pool)))[0]
+        to_write.append((cat, q, templates.get(cat, [])))
+
+    # 2) 通用问题：1 题放最后（不要太多）
+    common_pool = COMMON_QUESTIONS.get(COMMON_CATEGORY, [])
+    if common_pool:
+        q = rng.sample(common_pool, min(1, len(common_pool)))[0]
+        to_write.append((COMMON_CATEGORY, q, COMMON_TEMPLATES.get(COMMON_CATEGORY, [])))
+
+    created: list[ReflectionQuestion] = []
+    for order, (cat, q, tpls) in enumerate(to_write):
+        rq = ReflectionQuestion(
+            session_id=req.session_id,
+            task_id=storage_key,
+            question_text=q,
+            category=cat,
+            sort_order=order,
+            is_selected=1,
+            template_answers=json.dumps(tpls, ensure_ascii=False),
+        )
+        db.add(rq)
+        created.append(rq)
 
     db.commit()
-    return {"questions": [_serialize(q) for q in selected], "total": len(selected)}
+    return {"questions": [_serialize(q) for q in created], "total": len(created)}
 
 
 @router.post("/templates/generate")
@@ -102,23 +113,26 @@ def generate_templates_for_questions(session_id: int, db: DbSession = Depends(ge
     if not qs:
         raise HTTPException(status_code=404, detail="没有找到该会话的反思问题")
     for rq in qs:
-        rq.template_answers = json.dumps(_gen_templates(rq.question_text), ensure_ascii=False)
+        cfg, mode, _storage = _config_for_session(db, rq.session_id, rq.task_id)
+        _questions, templates = _resolve_pools(cfg, mode)
+        tpls = COMMON_TEMPLATES.get(rq.category, []) if rq.category == COMMON_CATEGORY else templates.get(rq.category, [])
+        rq.template_answers = json.dumps(tpls, ensure_ascii=False)
     db.commit()
     return {"questions": [_serialize(q) for q in qs]}
 
 
 @router.get("/questions")
-def get_questions(session_id: int, db: DbSession = Depends(get_db)):
-    """获取该 session 所有被选中的反思问题"""
-    qs = (
-        db.query(ReflectionQuestion)
-        .filter(
-            ReflectionQuestion.session_id == session_id,
-            ReflectionQuestion.is_selected == 1,
-        )
-        .order_by(ReflectionQuestion.sort_order)
-        .all()
+def get_questions(session_id: int, task_id: str | None = None, db: DbSession = Depends(get_db)):
+    """获取该 session 中属于指定实验的反思问题。
+    多个实验共享同一 demo 会话（session_id 相同），必须按 task_id 区分，
+    否则会读到其他实验生成的问题。"""
+    q = db.query(ReflectionQuestion).filter(
+        ReflectionQuestion.session_id == session_id,
+        ReflectionQuestion.is_selected == 1,
     )
+    if task_id:
+        q = q.filter(ReflectionQuestion.task_id == task_id)
+    qs = q.order_by(ReflectionQuestion.sort_order).all()
     return [_serialize(q) for q in qs]
 
 
@@ -211,53 +225,11 @@ def _generate_feedback(question: str, answer: str) -> str:
     return "。".join(filtered[:3]) + "。" if filtered else "继续深入思考，你会做得更好！"
 
 
-def _gen_templates(question: str) -> list[dict]:
-    """为反思问题生成 3 个模板回答（分值 2/3.5/5），占位符均为简单下划线。"""
-    templates = {
-        "hypothesis": [
-            {"text": "实验结果基本支持我的假设。", "score": 2.0, "level": "初步"},
-            {"text": "实验数据支持了我的假设。例如 ____ 的 ____ 达到了 ____，比 ____ 的 ____ 高了 ____。", "score": 3.5, "level": "较好"},
-            {"text": "实验结果部分支持了我的假设。具体来说，____ 在 ____ 下确实优于 ____，但在 ____ 下情况相反。这可能是因为 ____。所以我的假设需要修正为：____。", "score": 5.0, "level": "优秀"},
-        ],
-        "data": [
-            {"text": "数据看起来还行，____ 比其他的好一些。", "score": 2.0, "level": "初步"},
-            {"text": "最让我意外的是 ____ 的 ____ 数据。在 ____ 下它的 ____ 是 ____，而 ____ 是 ____。", "score": 3.5, "level": "较好"},
-            {"text": "从数据中我发现了一个反直觉的现象：____。最初我以为 ____，但深入分析后发现 ____。这让我重新思考了 ____。", "score": 5.0, "level": "优秀"},
-        ],
-        "method": [
-            {"text": "实验设计基本合理，我控制了一些变量。", "score": 2.0, "level": "初步"},
-            {"text": "我设置了 ____ 作为变化因素，控制了 ____。但回想起来，____ 可能也影响了结果，因为它 ____。", "score": 3.5, "level": "较好"},
-            {"text": "我的实验设计采用了 ____。自变量是 ____，控制变量包括 ____。但我注意到一个潜在的混淆因素：____。如果改进设计，我会 ____，这样可以更精确地分离出 ____ 的影响。", "score": 5.0, "level": "优秀"},
-        ],
-        "limitation": [
-            {"text": "实验有一些局限，比如数据可能不够多。", "score": 2.0, "level": "初步"},
-            {"text": "这个实验最大的局限在于 ____。比如我只测试了 ____，不能直接推广到 ____ 的情况。另外 ____。", "score": 3.5, "level": "较好"},
-            {"text": "实验有几个重要的局限性：1) ____；2) ____；3) ____。这些意味着我的结论主要适用于 ____，而不能推广到 ____。未来可以通过 ____ 来弥补这些不足。", "score": 5.0, "level": "优秀"},
-        ],
-        "improvement": [
-            {"text": "下次可以做更多实验，换不同的参数试试。", "score": 2.0, "level": "初步"},
-            {"text": "如果重做实验，我会 ____，因为从数据中发现 ____。另外我还想试试 ____，看看 ____。", "score": 3.5, "level": "较好"},
-            {"text": "基于这次实验的发现，我计划从两个方向改进：1) 实验层面：____；2) 研究方向层面：____。这个新问题的价值在于 ____。如果让我给新同学建议，我会说：____。", "score": 5.0, "level": "优秀"},
-        ],
-        "general": [
-            {"text": "通过这次实验我学到了一些东西。", "score": 2.0, "level": "初步"},
-            {"text": "我对 ____ 有了更深的理解。实验中 ____ 让我意识到 ____。", "score": 3.5, "level": "较好"},
-            {"text": "这次实验让我从 ____ 转变为 ____。对我来说最重要的发现是 ____，它改变了我对 ____ 的看法。", "score": 5.0, "level": "优秀"},
-        ],
-    }
-    cat = "general"
-    for kw, c in [("假设", "hypothesis"), ("数据", "data"), ("方法", "method"),
-                   ("局限", "limitation"), ("改进", "improvement"), ("改变", "improvement"),
-                   ("重新", "improvement"), ("推广", "limitation"), ("不足", "limitation")]:
-        if kw in question:
-            cat = c; break
-    return templates.get(cat, templates["general"])
-
-
 def _serialize(q: ReflectionQuestion) -> dict:
     return {
         "id": q.id,
         "session_id": q.session_id,
+        "task_id": q.task_id or "",
         "question_text": q.question_text,
         "category": q.category,
         "category_label": CATEGORY_LABELS.get(q.category, q.category),

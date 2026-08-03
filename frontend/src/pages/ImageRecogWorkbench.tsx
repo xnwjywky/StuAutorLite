@@ -11,6 +11,7 @@ import FlowStepper from "../components/FlowStepper";
 import StageContainer from "../components/StageContainer";
 import ChartPanel from "../components/ChartPanel";
 import AlgorithmCard from "../components/AlgorithmCard";
+import ReflectionStage from "../components/ReflectionStage";
 import ImageRecogVisualizer from "../components/ImageRecogVisualizer";
 import type { VisualizerStep } from "../components/ImageRecogVisualizer";
 import { useImageRecogStore, getDefaultAlgoParams } from "../stores/imageRecogStore";
@@ -24,7 +25,23 @@ const STEPS: { key: ResearchStage; label: string }[] = [
   { key: "EXPERIMENT_DESIGNED", label: "设计实验" },
   { key: "EXPERIMENT_RUNNING",  label: "运行实验" },
   { key: "RESULT_ANALYZED",     label: "分析结果" },
+  { key: "REFLECTION_COMPLETED",label: "反思改进" },
   { key: "REPORT_GENERATED",    label: "总结报告" },
+];
+
+const SHAPE_REFLECTION_FALLBACK = [
+  "哪种算法识别形状最准？噪声大时哪个最稳？",
+  "模板匹配在噪声大时表现如何？为什么？",
+  "圆形、三角形、正方形哪种最容易被认错？",
+  "样本量或噪声变化时，哪个算法受影响最大？",
+  "通过这次实验，你对图像识别有什么新的理解？",
+];
+const DIGIT_REFLECTION_FALLBACK = [
+  "哪种算法识别手写数字最准？",
+  "哪些数字容易被认错（如 4 和 9）？为什么？",
+  "噪声变大时哪个算法准确率下降最多？",
+  "数据量或训练比例变化时，哪个算法最稳定？",
+  "通过这次实验，你对机器学习有什么新的理解？",
 ];
 
 // ── 图形识别算法 ——
@@ -105,9 +122,29 @@ function StageRouter() {
   const stage = useImageRecogStore((s) => s.currentStage);
   switch (stage) {
     case "EXPERIMENT_DESIGNED": return <Stage4 />; case "EXPERIMENT_RUNNING": return <Stage5 />;
-    case "RESULT_ANALYZED": return <Stage6 />; case "REPORT_GENERATED": return <Stage7 />;
+    case "RESULT_ANALYZED": return <Stage6 />; case "REFLECTION_COMPLETED": return <ReflectionView />;
+    case "REPORT_GENERATED": return <Stage7 />;
     default: return <Stage1 />;
   }
+}
+
+// ═══════ 反思与改进 ═══════
+function ReflectionView() {
+  const store = useImageRecogStore();
+  const isShape = store.experimentType === "shape";
+  return (
+    <ReflectionStage
+      sessionId={store.sessionId!}
+      taskId={`${store.taskId}:${store.experimentType}`}
+      reflectionAnswers={store.reflectionAnswers}
+      onChange={(a) => store.set({ reflectionAnswers: a })}
+      fallbackQuestions={isShape ? SHAPE_REFLECTION_FALLBACK : DIGIT_REFLECTION_FALLBACK}
+      onQuestions={(qs) => store.set({ reflectionQuestions: qs })}
+      onBack={() => store.setStage("RESULT_ANALYZED")}
+      onNext={() => store.setStage("REPORT_GENERATED")}
+      step={5}
+    />
+  );
 }
 
 // ═══════ Stage1: 任务选择 ═══════
@@ -531,7 +568,7 @@ function Stage6() {
   };
   const handleSave = async () => { try { await saveAnalysis(store.sessionId!, store.studentAnalysis); } catch {} };
   return (
-    <StageContainer step={4} title="分析结果" agent={msg} actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("EXPERIMENT_RUNNING")}>← 上一步</button><button className="btn-primary" onClick={() => { handleSave(); store.setStage("REPORT_GENERATED"); }} disabled={!store.studentAnalysis.trim()}>保存 → 总结报告</button></div>}>
+    <StageContainer step={4} title="分析结果" agent={msg} actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("EXPERIMENT_RUNNING")}>← 上一步</button><button className="btn-primary" onClick={() => { handleSave(); store.setStage("REFLECTION_COMPLETED"); }} disabled={!store.studentAnalysis.trim()}>保存 → 反思改进</button></div>}>
       {store.experimentResult && <ChartPanel data={Object.entries(store.experimentResult.summary).map(([a, s]: any) => ({ algorithm: a, accuracy: +(s.avg_accuracy * 100).toFixed(1), min: +(s.min_accuracy * 100).toFixed(1), max: +(s.max_accuracy * 100).toFixed(1) }))} xKey="algorithm" bars={[{ key: "accuracy", name: "平均准确率(%)", color: "#3b82f6" }, { key: "min", name: "最低", color: "#f59e0b" }, { key: "max", name: "最高", color: "#22c55e" }]} />}
       <div className="flex items-center justify-between"><span className="text-sm text-gray-400">让 AI 帮你分析实验结果</span><button className="btn-secondary" onClick={handleAnalyze} disabled={analyzing}>{analyzing ? "分析中..." : "AI 分析结果"}</button></div>
       {store.aiAnalysis && <div className="card border-blue-100 bg-blue-50/30"><p className="font-medium text-gray-800 mb-3">📊 {store.aiAnalysis.summary}</p>{store.aiAnalysis.key_findings?.length > 0 && <ul className="mb-3 space-y-0.5">{store.aiAnalysis.key_findings.map((f: string, i: number) => <li key={i} className="text-sm text-gray-600">• {f}</li>)}</ul>}<div className="border-t border-blue-100 pt-3"><p className="text-sm font-medium text-gray-700 mb-1">思考：</p>{store.aiAnalysis.questions_for_student?.map((q: string, i: number) => <p key={i} className="text-sm text-gray-500">{i + 1}. {q}</p>)}</div></div>}
@@ -547,7 +584,7 @@ function Stage7() {
   const [preview, setPreview] = useState(false);
   const md = buildReport(store); if (!store.reportMarkdown) store.set({ reportMarkdown: md });
   return (
-    <StageContainer step={5} title="总结报告" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("RESULT_ANALYZED")}>← 上一步</button><button className="btn-primary" onClick={() => { archiveSession({ sessionId: store.sessionId, taskId: store.taskId, question: store.refinedQuestion || store.rawQuestion, hypothesis: store.hypothesis, algorithms: store.selectedAlgos, summary: store.experimentResult?.summary || null, analysis: store.studentAnalysis, reflection: {}, report: store.reportMarkdown, review: {} }); navigate("/archive"); }}>完成研究 → 档案</button></div>}>
+    <StageContainer step={6} title="总结报告" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("REFLECTION_COMPLETED")}>← 上一步</button><button className="btn-primary" onClick={() => { archiveSession({ sessionId: store.sessionId, taskId: store.taskId, question: store.refinedQuestion || store.rawQuestion, hypothesis: store.hypothesis, algorithms: store.selectedAlgos, summary: store.experimentResult?.summary || null, analysis: store.studentAnalysis, reflection: store.reflectionAnswers, report: store.reportMarkdown, review: {} }); navigate("/archive"); }}>完成研究 → 档案</button></div>}>
       <div className="card"><div className="flex gap-2 mb-4"><button className={`btn-secondary text-sm ${!preview ? "bg-gray-300" : ""}`} onClick={() => setPreview(false)}>编辑</button><button className={`btn-secondary text-sm ${preview ? "bg-gray-300" : ""}`} onClick={() => setPreview(true)}>预览</button></div>
         {preview ? <div className="min-h-[300px] border rounded-lg p-4 bg-white">{renderMarkdown(store.reportMarkdown)}</div> : <textarea className="w-full min-h-[300px] p-4 border rounded-lg font-mono text-sm resize-y" value={store.reportMarkdown} onChange={e => store.set({ reportMarkdown: e.target.value })} />}
       </div>
@@ -559,5 +596,8 @@ function buildReport(store: ReturnType<typeof useImageRecogStore.getState>): str
   const isShape = store.experimentType === "shape";
   const algoList = isShape ? SHAPE_ALGOS : DIGIT_ALGOS;
   const summary = store.experimentResult ? Object.entries(store.experimentResult.summary).map(([a, s]: any) => `| ${algoList.find(x => x.key === a)?.name || a} | ${(s.avg_accuracy * 100).toFixed(1)}% | ${s.avg_runtime_ms}ms |`).join("\n") : "| - | - | - |";
-  return [`# ${isShape ? "图形" : "手写数字"}识别算法比较研究`, "", `## 1. 研究问题`, store.refinedQuestion || store.rawQuestion, "", `## 2. 实验设计`, `- 对比算法：${store.selectedAlgos.join("、")}`, `- 数据量：${store.nSamples}`, `- 噪声水平：${(store.noiseLevel * 100).toFixed(0)}%`, `- 重复次数：${store.numTrials}`, "", `## 3. 实验结果`, `| 算法 | 平均准确率 | 平均耗时 |`, `|---|---:|---:|`, summary, "", `## 4. 结果分析`, store.studentAnalysis, "", `## 5. 总结`].join("\n");
+  const fallbackQs = isShape ? SHAPE_REFLECTION_FALLBACK : DIGIT_REFLECTION_FALLBACK;
+  const refQs = store.reflectionQuestions.length > 0 ? store.reflectionQuestions : fallbackQs;
+  const reflectionText = refQs.map((q, i) => `**${q}**\n\n${store.reflectionAnswers[i] || "（待补充）"}`).join("\n\n");
+  return [`# ${isShape ? "图形" : "手写数字"}识别算法比较研究`, "", `## 1. 研究问题`, store.refinedQuestion || store.rawQuestion, "", `## 2. 实验设计`, `- 对比算法：${store.selectedAlgos.join("、")}`, `- 数据量：${store.nSamples}`, `- 噪声水平：${(store.noiseLevel * 100).toFixed(0)}%`, `- 重复次数：${store.numTrials}`, "", `## 3. 实验结果`, `| 算法 | 平均准确率 | 平均耗时 |`, `|---|---:|---:|`, summary, "", `## 4. 结果分析`, store.studentAnalysis, "", `## 5. 反思与改进`, reflectionText, "", `## 6. 总结`].join("\n");
 }

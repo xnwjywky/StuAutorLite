@@ -1,6 +1,6 @@
 """数据库模型 — 设计文档 §10"""
 
-from sqlalchemy import create_engine, Column, Integer, String, Text, Float, DateTime, ForeignKey, func
+from sqlalchemy import create_engine, Column, Integer, String, Text, Float, DateTime, ForeignKey, func, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker, relationship
 
 DATABASE_URL = "sqlite:///./data/stuautor.db"
@@ -156,6 +156,7 @@ class ReflectionQuestion(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
+    task_id = Column(String(64), default="")              # 所属实验类型，用于区分同一 demo 会话下不同实验的问题
     question_text = Column(Text, nullable=False)
     category = Column(String(64), default="general")      # 类别：hypothesis/data/method/limitation/improvement
     sort_order = Column(Integer, default=0)               # 展示顺序
@@ -415,3 +416,16 @@ def get_db():
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _migrate_reflection_task_id()
+
+
+def _migrate_reflection_task_id():
+    """为已有数据库的 reflection_questions 表补充 task_id 列（旧库升级，幂等）。"""
+    try:
+        if "reflection_questions" in inspect(engine).get_table_names():
+            cols = {c["name"] for c in inspect(engine).get_columns("reflection_questions")}
+            if "task_id" not in cols:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE reflection_questions ADD COLUMN task_id VARCHAR(64) DEFAULT ''"))
+    except Exception:
+        pass

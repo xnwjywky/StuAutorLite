@@ -47,6 +47,12 @@ def list_agents():
     return [{"name": name, "label": type(a).__name__} for name, a in gw.agents.items()]
 
 
+@router.get("/usage")
+def get_token_usage():
+    """累计 token 使用量（跨重启持久化）"""
+    return get_gateway().get_token_usage()
+
+
 @router.post("/{agent_name}/invoke")
 async def invoke_agent(
     agent_name: str,
@@ -149,6 +155,7 @@ async def general_chat(
     ])
     try:
         raw = await llm.chat(messages, temperature=0.5)
+        get_gateway().record_usage(llm.last_usage, llm.model)
         content = raw.get("choices", [{}])[0].get("message", {}).get("content", "")
         # 尝试把结果整理成可用的 JSON
         return {"agent_name": "general_llm", "result": {"content_markdown": content, "polished": content}}

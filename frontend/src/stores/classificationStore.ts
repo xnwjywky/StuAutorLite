@@ -44,6 +44,7 @@ export interface ClassifyWorkflowData {
 
   // Stage 7 — 反思改进
   reflectionAnswers: Record<number, string>;
+  reflectionQuestions: string[];
 
   // Stage 8 — 研究报告
   reportMarkdown: string;
@@ -82,6 +83,7 @@ const defaults = (): ClassifyWorkflowData => ({
   studentAnalysis: "",
   aiAnalysis: null,
   reflectionAnswers: {},
+  reflectionQuestions: [],
   reportMarkdown: "",
   reviewResult: null,
 });

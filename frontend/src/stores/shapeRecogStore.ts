@@ -12,6 +12,8 @@ export interface ShapeRecogWorkflowData {
   experimentResult: { experiment_batch_id: string; status: string; total_runs: number; summary: Record<string, any>; runs: any[] } | null;
   selectedTrial: number;
   studentAnalysis: string; aiAnalysis: { summary: string; key_findings: string[]; questions_for_student: string[] } | null;
+  reflectionAnswers: Record<number, string>;
+  reflectionQuestions: string[];
   reportMarkdown: string;
 }
 
@@ -23,7 +25,9 @@ const defaults = (): ShapeRecogWorkflowData => ({
   selectedAlgorithms: [], nSamples: 200, noiseLevels: [0.0],
   numTrials: 5, trainRatio: 0.7, designCompleted: false,
   experimentResult: null, selectedTrial: 1,
-  studentAnalysis: "", aiAnalysis: null, reportMarkdown: "",
+  studentAnalysis: "", aiAnalysis: null,
+  reflectionAnswers: {}, reflectionQuestions: [],
+  reportMarkdown: "",
 });
 
 export const useShapeRecogStore = create<ShapeRecogWorkflowData & {

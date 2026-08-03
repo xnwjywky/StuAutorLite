@@ -9,6 +9,7 @@ import FlowStepper from "../components/FlowStepper";
 import StageContainer from "../components/StageContainer";
 import ChartPanel from "../components/ChartPanel";
 import AlgorithmCard from "../components/AlgorithmCard";
+import ReflectionStage from "../components/ReflectionStage";
 import { useGuessNumberStore } from "../stores/guessNumberStore";
 import {
   runGuessExperiment, saveQuestion, saveAnalysis,
@@ -24,7 +25,16 @@ const STEPS: { key: ResearchStage; label: string }[] = [
   { key: "EXPERIMENT_DESIGNED", label: "设计实验" },
   { key: "EXPERIMENT_RUNNING",  label: "运行实验" },
   { key: "RESULT_ANALYZED",     label: "分析结果" },
+  { key: "REFLECTION_COMPLETED",label: "反思改进" },
   { key: "REPORT_GENERATED",    label: "总结报告" },
+];
+
+const REFLECTION_FALLBACK = [
+  "哪种策略平均猜的次数最少？为什么？",
+  "二分查找的平均次数和理论值 log₂(N) 接近吗？",
+  "数字范围扩大时，哪种策略最受影响？",
+  "随机策略不稳定，重复多少次才能公平比较？",
+  "通过这次实验，你对科学研究的过程有什么新的理解？",
 ];
 
 const QUESTION_TEMPLATES = [
@@ -115,9 +125,28 @@ function StageRouter() {
     case "EXPERIMENT_DESIGNED": return <Stage4 />;
     case "EXPERIMENT_RUNNING":  return <Stage5 />;
     case "RESULT_ANALYZED":     return <Stage6 />;
+    case "REFLECTION_COMPLETED":return <ReflectionView />;
     case "REPORT_GENERATED":    return <Stage7 />;
     default: return <TaskAndQuestion />;
   }
+}
+
+// ═══════ 反思与改进 ═══════
+function ReflectionView() {
+  const store = useGuessNumberStore();
+  return (
+    <ReflectionStage
+      sessionId={store.sessionId!}
+      taskId={store.taskId}
+      reflectionAnswers={store.reflectionAnswers}
+      onChange={(a) => store.set({ reflectionAnswers: a })}
+      fallbackQuestions={REFLECTION_FALLBACK}
+      onQuestions={(qs) => store.set({ reflectionQuestions: qs })}
+      onBack={() => store.setStage("RESULT_ANALYZED")}
+      onNext={() => store.setStage("REPORT_GENERATED")}
+      step={7}
+    />
+  );
 }
 
 // ═══════ 统一任务选择 + 研究问题 + 流程预览 ═══════
@@ -373,7 +402,7 @@ function Stage6() {
   const handleSave = async () => { try { await saveAnalysis(store.sessionId!, store.studentAnalysis); } catch {} };
 
   return (
-    <StageContainer step={6} title="分析结果" agent={msg} actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("EXPERIMENT_RUNNING")}>← 上一步</button><button className="btn-primary" onClick={() => { handleSave(); store.setStage("REPORT_GENERATED"); }} disabled={!store.studentAnalysis.trim()}>保存 → 总结报告</button></div>}>
+    <StageContainer step={6} title="分析结果" agent={msg} actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("EXPERIMENT_RUNNING")}>← 上一步</button><button className="btn-primary" onClick={() => { handleSave(); store.setStage("REFLECTION_COMPLETED"); }} disabled={!store.studentAnalysis.trim()}>保存 → 反思改进</button></div>}>
       {store.experimentResult && (
         <ChartPanel data={Object.entries(store.experimentResult.summary).map(([a, s]: any) => ({ strategy: a, avg: s.avg_guesses, min: s.min_guesses, max: s.max_guesses }))} xKey="strategy"
           bars={[{ key: "avg", name: "平均次数", color: "#3b82f6" }, { key: "min", name: "最少次数", color: "#22c55e" }, { key: "max", name: "最多次数", color: "#ef4444" }]} />
@@ -394,12 +423,12 @@ function Stage7() {
   if (!store.reportMarkdown) store.set({ reportMarkdown: md });
 
   const complete = () => {
-    archiveSession({ sessionId: store.sessionId, taskId: store.taskId, question: store.refinedQuestion || store.rawQuestion, hypothesis: store.hypothesis, algorithms: store.selectedStrategies, summary: store.experimentResult?.summary || null, analysis: store.studentAnalysis, reflection: {}, report: store.reportMarkdown, review: {} });
+    archiveSession({ sessionId: store.sessionId, taskId: store.taskId, question: store.refinedQuestion || store.rawQuestion, hypothesis: store.hypothesis, algorithms: store.selectedStrategies, summary: store.experimentResult?.summary || null, analysis: store.studentAnalysis, reflection: store.reflectionAnswers, report: store.reportMarkdown, review: {} });
     navigate("/archive");
   };
 
   return (
-    <StageContainer step={7} title="总结报告" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("RESULT_ANALYZED")}>← 上一步</button><button className="btn-primary" onClick={complete}>完成研究 → 查看档案</button></div>}>
+    <StageContainer step={8} title="总结报告" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("REFLECTION_COMPLETED")}>← 上一步</button><button className="btn-primary" onClick={complete}>完成研究 → 查看档案</button></div>}>
       <div className="card">
         <div className="flex gap-2 mb-4"><button className={`btn-secondary text-sm ${!preview ? "bg-gray-300" : ""}`} onClick={() => setPreview(false)}>编辑</button><button className={`btn-secondary text-sm ${preview ? "bg-gray-300" : ""}`} onClick={() => setPreview(true)}>预览</button></div>
         {preview ? <div className="min-h-[300px] border rounded-lg p-4 bg-white">{renderMarkdown(store.reportMarkdown)}</div> : <textarea className="w-full min-h-[300px] p-4 border rounded-lg font-mono text-sm resize-y focus:outline-none focus:ring-2 focus:ring-gray-300" value={store.reportMarkdown} onChange={(e) => store.set({ reportMarkdown: e.target.value })} />}
@@ -411,7 +440,9 @@ function Stage7() {
 // ═══════ Helpers ═══════
 function buildReport(store: ReturnType<typeof useGuessNumberStore.getState>): string {
   const summary = store.experimentResult ? Object.entries(store.experimentResult.summary).map(([a, s]: any) => `| ${a === "BINARY" ? "二分查找" : a === "RANDOM" ? "随机猜测" : "线性扫描"} | ${s.avg_guesses} | ${s.min_guesses} | ${s.max_guesses} | ${(s.success_rate * 100).toFixed(0)}% |`).join("\n") : "| - | - | - | - | - |";
-  return [`# 猜数字策略比较研究`, ``, `## 1. 研究问题`, store.refinedQuestion || store.rawQuestion, ``, `## 2. 我的假设`, store.hypothesis, ``, `## 3. 实验设计`, `- 对比策略：${store.selectedStrategies.join("、")}`, `- 数字范围：${store.numberLow}-${store.numberHigh}`, `- 重复次数：${store.numTrials}`, ``, `## 4. 实验结果`, `| 策略 | 平均次数 | 最少次数 | 最多次数 | 成功率 |`, `|---|---:|---:|---:|---:|`, summary, ``, `## 5. 我的分析 & 学到的知识`, store.studentAnalysis, ``, `## 6. 总结`].join("\n");
+  const refQs = store.reflectionQuestions.length > 0 ? store.reflectionQuestions : REFLECTION_FALLBACK;
+  const reflectionText = refQs.map((q, i) => `**${q}**\n\n${store.reflectionAnswers[i] || "（待补充）"}`).join("\n\n");
+  return [`# 猜数字策略比较研究`, ``, `## 1. 研究问题`, store.refinedQuestion || store.rawQuestion, ``, `## 2. 我的假设`, store.hypothesis, ``, `## 3. 实验设计`, `- 对比策略：${store.selectedStrategies.join("、")}`, `- 数字范围：${store.numberLow}-${store.numberHigh}`, `- 重复次数：${store.numTrials}`, ``, `## 4. 实验结果`, `| 策略 | 平均次数 | 最少次数 | 最多次数 | 成功率 |`, `|---|---:|---:|---:|---:|`, summary, ``, `## 5. 我的分析 & 学到的知识`, store.studentAnalysis, ``, `## 6. 反思与改进`, reflectionText, ``, `## 7. 总结`].join("\n");
 }
 
 function generateMock(store: ReturnType<typeof useGuessNumberStore.getState>) {
