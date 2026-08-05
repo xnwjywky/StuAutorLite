@@ -12,7 +12,8 @@ cd backend
 # source .venv/bin/activate     # macOS/Linux
 pip install -r requirements.txt
 
-# MNIST 实验需要 PyTorch（可选，纯分类实验不需要）
+# MNIST 实验需要 PyTorch（可选，其余 7 类实验为纯 Python 算法，无需 torch）
+# 国产化 ARM（鲲鹏/飞腾）无 PyPI wheel 时，可只装纯 Python 依赖跑非 MNIST 实验
 # pip install torch torchvision numpy psutil
 pip install torch==2.4.0 torch_npu==2.4.0.post2 torchvision==0.19.0 numpy psutil
 
@@ -85,6 +86,8 @@ cd .. && python run_tests.py
 >
 > 所有实验通过首页"发现研究任务"卡片进入，机器人避障实验对应 `/workbench-rl/:id` 路由。
 
+**反思与改进（每实验专属）**：9 个实验（含排序/字符串、图形/数字子模式共 11 套）各生成 4 道实验强相关 + 1 道通用反思问题，模板按科研能力 2.0/3.5/5.0 分层、填空 ≤2，进入页面默认不选模板。顶栏 🪙 徽章可查看累计 Token 使用量（总/输入/输出、调用次数、模型）。
+
 ## 技术栈
 
 | 层 | 技术 |
@@ -128,6 +131,23 @@ cd .. && python run_tests.py
 │       └── utils/             # 工具函数 (format + markdown 渲染)
 └── run_tests.py               # 一键测试运行器
 ```
+
+## 国产化部署
+
+面向鲲鹏/飞腾（ARM64）、海光/兆芯（x86_64）、麒麟 V10 / 统信 UOS / openEuler 等国产环境，**已具备昇腾 NPU 支持**（torch_npu 延迟导入 + npu-smi 探测，设备优先级 CUDA > MPS > NPU > CPU）。除 MNIST 外的 7 类实验为纯 Python 算法，**无 torch 也能完整运行**（MNIST 自动降级提示）。
+
+### 常见问题与建议
+
+| 问题 | 影响 | 建议 |
+|------|------|------|
+| `requirements.txt` 将 torch/torchvision 列为必装 | ARM 平台无 PyPI wheel 时 `pip install` 失败，连纯算法实验都起不来 | 拆出可选 `requirements-mnist.txt`；主依赖固定 `numpy>=1.24,<2.0`；用华为云/清华 PyPI 镜像 |
+| SQLite 与 MNIST 数据用相对路径 `./data` | 从不同 cwd 启动时数据落在错误位置 | 改用 `Path(__file__)` 绝对路径；systemd 固定 WorkingDirectory |
+| `docker-compose.yml` 缺少 Dockerfile | `docker compose up` 失败 | 补 multi-arch Dockerfile（`--platform linux/arm64,linux/amd64`）+ 国内镜像源 |
+| Python 需 3.12 / Node 需 18+ | 国产 OS 默认版本偏低 | 用 `python:3.12` 容器；Node 从 npmmirror.com 安装 |
+| `config.py` 默认 LLM 指向 openai.com | 无代理访问不了 | 改用 DeepSeek / 硅基流动 / 本地 vLLM（前端默认已是 DeepSeek） |
+| Canvas emoji（🤖 等）依赖彩色 emoji 字体 | 国产 OS 可能显示为方块 | 装 `fonts-noto-color-emoji`，或关键图标改 SVG |
+
+详细部署清单见 `work.md §十二`。国内源速查：PyPI 清华/华为云镜像、npm `registry.npmmirror.com`、Docker 华为云 SWR。
 
 ## License
 
