@@ -84,15 +84,25 @@ const STRATEGY_INFO: Record<string, { explanation: string; analogy: string; pros
 const TRIALS = [1, 3, 5, 10];
 
 type AgentResult<T> = { ok: true; data: T } | { ok: false; error: string; agentName: string };
+
+const _agentInFlight = new Set<string>();
+
 async function callAgent(agentName: string, stage: string, fn: () => Promise<{ result?: unknown } | null>): Promise<AgentResult<unknown>> {
   if (!hasAgentConfig()) return { ok: false, error: "未配置 Agent", agentName };
+  const _key = `${agentName}:${stage}`;
+  if (_agentInFlight.has(_key)) {
+    return { ok: false, error: "该 Agent 正在处理中，请稍候", agentName };
+  }
+  _agentInFlight.add(_key);
   try {
     const resp = await fn();
     const result = resp?.result as Record<string, unknown> | undefined;
     if (result?.error) { logAgentError(agentName, stage, String(result.error)); return { ok: false, error: String(result.error), agentName }; }
     if (result && Object.keys(result).length > 0) return { ok: true, data: result };
     return { ok: false, error: `${agentName} 返回空结果`, agentName };
-  } catch (e: any) { logAgentError(agentName, stage, e?.message || String(e)); return { ok: false, error: e?.message || String(e), agentName }; }
+  } catch (e: any) { logAgentError(agentName, stage, e?.message || String(e)); return { ok: false, error: e?.message || String(e), agentName }; } finally {
+    _agentInFlight.delete(_key);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════

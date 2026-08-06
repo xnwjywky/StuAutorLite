@@ -1,11 +1,22 @@
 """数据库模型 — 设计文档 §10"""
 
-from sqlalchemy import create_engine, Column, Integer, String, Text, Float, DateTime, ForeignKey, func, inspect, text
+from sqlalchemy import create_engine, Column, Integer, String, Text, Float, DateTime, ForeignKey, func, inspect, text, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker, relationship
 
 DATABASE_URL = "sqlite:///./data/stuautor.db"
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+
+
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragma(dbapi_connection, connection_record):
+    """SQLite 开启 WAL + busy_timeout，避免 MNIST 训练并发写表时报 database is locked"""
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("PRAGMA busy_timeout=5000;")
+    cursor.close()
+
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

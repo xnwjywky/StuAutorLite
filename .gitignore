@@ -20,6 +20,8 @@ __pycache__/
 # Database files (may contain user data)
 backend/data/*.db
 backend/data/*.sqlite
+backend/data/*.db-wal
+backend/data/*.db-shm
 
 # Token usage runtime state
 backend/data/token_usage.json

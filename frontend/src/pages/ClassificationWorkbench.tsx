@@ -92,18 +92,28 @@ const MAX_DEPTHS = [2, 3, 4, 5, 99]; // 99 = unlimited
 
 // ═══════ 通用 Agent 调用器（复用 Workbench.tsx 模式）═══════
 type AgentCallResult<T> = { ok: true; data: T } | { ok: false; error: string; agentName: string };
+
+const _agentInFlight = new Set<string>();
+
 async function callAgent(
   agentName: string, stage: string,
   fn: () => Promise<{ result?: unknown } | null>,
 ): Promise<AgentCallResult<unknown>> {
   if (!hasAgentConfig()) return { ok: false, error: "未配置 Agent（请在 ⚙️ Agent 配置页面添加 API Key）", agentName };
+  const _key = `${agentName}:${stage}`;
+  if (_agentInFlight.has(_key)) {
+    return { ok: false, error: "该 Agent 正在处理中，请稍候", agentName };
+  }
+  _agentInFlight.add(_key);
   try {
     const resp = await fn();
     const result = resp?.result as Record<string, unknown> | undefined;
     if (result?.error) { const msg = String(result.error); logAgentError(agentName, stage, msg); return { ok: false, error: msg, agentName }; }
     if (result && Object.keys(result).length > 0) return { ok: true, data: result };
     const err = `${agentName} 返回了空结果，已使用模板替代`; logAgentError(agentName, stage, err); return { ok: false, error: err, agentName };
-  } catch (e: any) { const msg = `${agentName} 请求失败: ${e?.message || String(e)}`; logAgentError(agentName, stage, msg); return { ok: false, error: msg, agentName }; }
+  } catch (e: any) { const msg = `${agentName} 请求失败: ${e?.message || String(e)}`; logAgentError(agentName, stage, msg); return { ok: false, error: msg, agentName }; } finally {
+    _agentInFlight.delete(_key);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════

@@ -57,7 +57,7 @@ export async function reviewDesign(design: Record<string, unknown>): Promise<{
 export async function runExperiment(data: {
   session_id: number; algorithms: string[]; settings: Record<string, unknown>;
 }): Promise<ExperimentSummary & { runs: any[] }> {
-  return apiClient.post("/api/experiments/run", data) as Promise<any>;
+  return apiClient.post("/api/experiments/run", data, { timeout: 600000 }) as Promise<any>;
 }
 
 // ── 分析 ────────────────────────────────────────────────
@@ -208,7 +208,7 @@ export function logAgentError(agentName: string, stage: string, error: unknown) 
 export async function runClassificationExperiment(data: {
   session_id: number; classifiers: string[]; settings: Record<string, unknown>;
 }): Promise<ClassificationResult & { runs: any[] }> {
-  return apiClient.post("/api/classify/run", data) as Promise<any>;
+  return apiClient.post("/api/classify/run", data, { timeout: 600000 }) as Promise<any>;
 }
 
 export async function listClassificationRuns(sessionId?: number): Promise<any[]> {
@@ -219,35 +219,35 @@ export async function listClassificationRuns(sessionId?: number): Promise<any[]>
 export async function runGuessExperiment(data: {
   session_id: number; strategies: string[]; settings: Record<string, unknown>;
 }): Promise<import("../types").GuessResult & { runs: any[] }> {
-  return apiClient.post("/api/guessnumber/run", data) as Promise<any>;
+  return apiClient.post("/api/guessnumber/run", data, { timeout: 600000 }) as Promise<any>;
 }
 
 // ── 排序算法实验 ──────────────────────────────────────────
 export async function runSortingExperiment(data: {
   session_id: number; algorithms: string[]; settings: Record<string, unknown>;
 }): Promise<import("../types").SortingResult & { runs: any[] }> {
-  return apiClient.post("/api/sorting/run", data) as Promise<any>;
+  return apiClient.post("/api/sorting/run", data, { timeout: 600000 }) as Promise<any>;
 }
 
 // ── 字符串搜索实验 ──────────────────────────────────────────
 export async function runStringSearchExperiment(data: {
   session_id: number; algorithms: string[]; settings: Record<string, unknown>;
 }): Promise<import("../types").StringSearchResult & { runs: any[] }> {
-  return apiClient.post("/api/stringsearch/run", data) as Promise<any>;
+  return apiClient.post("/api/stringsearch/run", data, { timeout: 600000 }) as Promise<any>;
 }
 
 // ── 图形识别实验 ──────────────────────────────────────────
 export async function runShapeRecogExperiment(data: {
   session_id: number; algorithms: string[]; settings: Record<string, unknown>;
 }): Promise<import("../types").ShapeRecogResult & { runs: any[] }> {
-  return apiClient.post("/api/shaperecog/run", data) as Promise<any>;
+  return apiClient.post("/api/shaperecog/run", data, { timeout: 600000 }) as Promise<any>;
 }
 
 // ── 手写数字识别实验 ──────────────────────────────────────────
 export async function runDigitsExperiment(data: {
   session_id: number; algorithms: string[]; settings: Record<string, unknown>;
 }): Promise<import("../types").DigitRecogResult & { runs: any[] }> {
-  return apiClient.post("/api/digits/run", data) as Promise<any>;
+  return apiClient.post("/api/digits/run", data, { timeout: 600000 }) as Promise<any>;
 }
 
 // ── MNIST 手写数字识别实验 ────────────────────────────────────
@@ -265,7 +265,7 @@ export async function runImageRecogExperiment(data: {
   session_id: number; experiment_type: string; algorithms: string[];
   algo_params?: Record<string, Record<string, number>>; settings: Record<string, unknown>;
 }): Promise<import("../types").ImageRecogResult & { runs: any[] }> {
-  return apiClient.post("/api/imagerecog/run", data) as Promise<any>;
+  return apiClient.post("/api/imagerecog/run", data, { timeout: 600000 }) as Promise<any>;
 }
 
 /** SSE 流式运行 — 返回 ReadableStream 用于实时进度 */

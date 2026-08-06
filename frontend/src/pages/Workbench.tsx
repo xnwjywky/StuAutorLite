@@ -73,6 +73,8 @@ const TRIALS = [1, 3, 5, 10];
 // ═══════ 通用 Agent 调用器 — 重试 + 日志 + 降级 ═══════
 type AgentCallResult<T> = { ok: true; data: T } | { ok: false; error: string; agentName: string };
 
+const _agentInFlight = new Set<string>();
+
 async function callAgent(
   agentName: string, stage: string,
   fn: () => Promise<{ result?: unknown } | null>,
@@ -80,6 +82,11 @@ async function callAgent(
   if (!hasAgentConfig()) {
     return { ok: false, error: "未配置 Agent（请在 ⚙️ Agent 配置页面添加 API Key）", agentName };
   }
+  const _key = `${agentName}:${stage}`;
+  if (_agentInFlight.has(_key)) {
+    return { ok: false, error: "该 Agent 正在处理中，请稍候", agentName };
+  }
+  _agentInFlight.add(_key);
   try {
     const resp = await fn();
     const result = resp?.result as Record<string, unknown> | undefined;
@@ -97,6 +104,8 @@ async function callAgent(
     const msg = `${agentName} 请求失败: ${e?.message || String(e)}`;
     logAgentError(agentName, stage, msg);
     return { ok: false, error: msg, agentName };
+  } finally {
+    _agentInFlight.delete(_key);
   }
 }
 
