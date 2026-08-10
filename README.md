@@ -26,18 +26,38 @@ npm run dev
 
 # 3. 运行测试
 cd .. && python run_tests.py
+# 后端测试默认跳过 slow 类（真实训练/网络下载，避免长时间占用资源）；
+# 需要完整验证时显式运行：cd backend && python -m pytest --runslow
+# 全局有 pytest-timeout（120s/用例），防死循环/挂起
 ```
 
 前端 http://localhost:5173 | API 文档 http://localhost:8000/docs
 
-> 后端启动后会自动在后台线程中串行训练 MiniCNN/StandardCNN/DeepCNN 三个预训练模型（首次约需 5-15 分钟/模型），供 MNIST 上传识别使用。通过 `/api/mnist/model-status` 可查询训练进度。
+> 后端启动后会自动在后台线程中串行训练 MiniCNN/StandardCNN/DeepCNN 三个预训练模型（首次约需 5-15 分钟/模型），供 MNIST 上传识别使用。通过 `/api/mnist/model-status` 可查询训练进度（训练状态持久化到 `data/models/pretrain_status.json`，进程重启自动恢复）。
 >
 > 局域网其他设备通过 `http://<本机IP>:5173` 访问；前端已配置 `host: "0.0.0.0"`。
 
+## 安全与部署（课堂/共享环境必读）
 
-<!-- MNIST 模型很小（~400K 参数量），DataParallel 瓶颈不在计算而在通信——每个 batch 都要把模型复制到 8 张卡、前向后聚合梯度。模型越小，通信占比越大。对于大模型（如 ResNet-50），8 卡能接近线性加速；对于 MNIST，2-4 卡通常是最佳配置。
+应用默认处于**开发态**（零鉴权、CORS 仅本地前端源）。部署到多人/局域网共享环境前，请按需配置以下环境变量（详见 `SECURITY_STABILITY_REVIEW.md` §0.1 修复状态追踪）：
 
-如果需要提升 MNIST 训练速度，建议在 Stage2 设计实验时选择较小的架构（MiniCNN 32K） 或减少 epoch 数，比增加卡数更有效。 -->
+| 配置项 | 作用 | 默认 |
+|---|---|---|
+| `APP_KEY` | 全站轻量鉴权：设置后所有 `/api` 请求须带 `X-App-Key` 头，否则 401 | 空（不启用） |
+| `VITE_APP_KEY` | 前端对应密钥，设置后所有请求自动带 `X-App-Key`（与 `APP_KEY` 一致） | 空 |
+| `CORS_ORIGINS` | 允许的前端来源，逗号分隔（如 `https://你的域名`） | `http://localhost:5173,http://127.0.0.1:5173` |
+
+> 除 `CORS_ORIGINS` 外，后端还会自动放行**回环与局域网私有网段**来源
+> （`localhost` / `127.0.0.1` / `10.x` / `172.16-31.x` / `192.168.x` 任意端口），
+> 以支持「局域网其他设备经 `http://<本机IP>:5173` 访问」——若局域网访问出现
+> Network Error，多半是前端来源不在放行范围内，请用 `curl -H "Origin: http://<本机IP>:5173" http://localhost:8000/api/agents/` 验证。
+| `RATE_LIMIT_PER_MINUTE` | 每 IP 每分钟最大 API 请求数（防 LLM 端点被刷产生费用）；0=关闭 | `0` |
+| `DEBUG` | 生产环境务必设为 `false`，并去掉 `uvicorn --reload` | `true` |
+
+安全要点：
+- **不要将服务直接暴露到公网**；如需远程访问请走反向代理（HTTPS）+ 设置 `APP_KEY`
+- 前端 Agent API Key 已改为 **sessionStorage** 存储（关闭标签页即清除），不再明文长期落盘；文案已如实说明密钥会发送到后端用于调用模型服务商
+- 用户模型以 `weights_only=True` 安全加载，`model_id` 有白名单校验（防路径遍历）
 
 ## 实验任务
 
@@ -62,6 +82,8 @@ cd .. && python run_tests.py
 - **多卡并行训练**：自动检测空闲 NPU/CUDA 卡 → `nn.DataParallel`，按模型参数量动态限制卡数（MiniCNN=2, StandardCNN=4, DeepCNN=8）
 - **SSE 流式训练**：epoch 级实时推送 loss/accuracy 曲线、batch 级进度、设备使用率
 - **手写画板识别**：在线画板直接写数字 → 下拉选择模型（3 预训练 + 1 用户训练），开始识别后画板锁定，识别完成可重新编辑
+- **训练互斥（MNIST_ACCURACY_FIX）**：用户训练（`/run` 与 `/run-stream` SSE）与后台预训练共用进程级互斥锁，杜绝 torch CPU 并发数据竞争（此前会导致准确率卡 ~10%）；改 lr/batch_size 等超参现已真实生效（前端 camelCase 与后端 snake_case 兼容）
+- **预训练幂等**：后台预训练已在运行时不会重复启动
 
 ## 强化学习格子世界
 

@@ -141,8 +141,9 @@ class TestRunner:
         assert r["experiment_type"] == "digits"
         assert "PIXEL_KNN" in r["summary"]
 
+    @pytest.mark.slow
     def test_algo_params_passed(self):
-        """自定义算法参数应生效"""
+        """自定义算法参数应生效（MLP epochs=10 真实训练 → slow，默认跳过）"""
         r = ImageRecogRunner().run({
             "experiment_type": "shape",
             "algorithms": ["MLP"],

@@ -96,6 +96,7 @@ class TestDigitAlgorithms:
 
 
 class TestDigitsRunner:
+    @pytest.mark.slow
     def test_basic_run(self):
         r = DigitsRunner().run({
             "algorithms": ["PIXEL_KNN", "RANDOM", "DECISION_TREE"],
@@ -104,6 +105,7 @@ class TestDigitsRunner:
         assert r["total_runs"] == 6
         assert r["summary"]["PIXEL_KNN"]["avg_accuracy"] > 0.3
 
+    @pytest.mark.slow
     def test_with_noise(self):
         r = DigitsRunner().run({
             "algorithms": ["PIXEL_KNN"],
@@ -111,8 +113,9 @@ class TestDigitsRunner:
         })
         assert r["total_runs"] == 2
 
+    @pytest.mark.slow
     def test_all_algorithms(self):
-        """Runner 应支持所有算法"""
+        """Runner 应支持所有算法（含 MLP/CNN 真实训练 → slow，默认跳过）"""
         r = DigitsRunner().run({
             "algorithms": ["PIXEL_KNN", "DECISION_TREE", "MLP", "CNN", "RANDOM"],
             "n_samples": 50, "num_trials": 1, "seed": 7,

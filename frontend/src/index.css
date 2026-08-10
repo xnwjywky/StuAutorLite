@@ -22,14 +22,3 @@
     @apply bg-white rounded-xl shadow-sm border border-gray-100 p-6;
   }
 }
-
-@layer utilities {
-  /* 隐藏滚动条但保留滚动功能 */
-  .scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
-  }
-}

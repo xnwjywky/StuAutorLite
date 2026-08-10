@@ -1,0 +1,8 @@
+{
+  "status": {
+    "minicnn": "cached",
+    "standardcnn": "cached",
+    "deepcnn": "cached"
+  },
+  "progress": {}
+}

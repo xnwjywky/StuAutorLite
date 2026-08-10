@@ -1,10 +1,10 @@
 """研究问题路由 — 设计文档 §11.2-11.3"""
 
 import json
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session as DbSession
 from app.models.database import get_db, Question, Session as SessionModel
-from app.models.schemas import QuestionCreate, QuestionSuggestRequest, QuestionResponse
+from app.models.schemas import QuestionCreate, QuestionSuggestRequest
 from app.agents.research_mentor import ResearchMentor
 
 router = APIRouter(prefix="/research/questions", tags=["questions"])

@@ -6,6 +6,7 @@ import json
 import re
 import time
 import threading
+from collections import deque
 from pathlib import Path
 from app.utils.llm_client import LLMClient
 from app.utils.logger import get_logger
@@ -13,6 +14,12 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 MAX_RETRIES = 1  # 只重试 1 次，减少无效 token 消耗
+
+# S-中-4：调用日志内存上限（进程级，防长时间运行无限增长）
+_MAX_CALL_LOG = 200
+
+# S-中-5：token 用量落盘节流间隔（秒）——避免每次调用都写盘
+_USAGE_SAVE_INTERVAL = 30.0
 
 # Token 用量持久化文件（backend/data/token_usage.json）
 _USAGE_FILE = Path(__file__).resolve().parent.parent.parent / "data" / "token_usage.json"
@@ -45,12 +52,12 @@ def _schema_to_prompt(schema: dict | None) -> str:
 
 class AgentGateway:
 
-    def __init__(self, llm: LLMClient | None = None):
-        self.llm = llm
+    def __init__(self):
         self.agents: dict[str, object] = {}
-        self._call_log: list[dict] = []
-        # Token 用量累计（持久化到 JSON，重启不丢失）
+        self._call_log: deque = deque(maxlen=_MAX_CALL_LOG)  # S-中-4：自动截断，内存有上限
+        # Token 用量累计（持久化到 JSON，重启不丢失；节流落盘，S-中-5）
         self._usage_lock = threading.Lock()
+        self._last_usage_save: float = 0.0
         self._usage: dict = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
@@ -63,7 +70,11 @@ class AgentGateway:
 
     # ── Token 用量统计 ─────────────────────────────────────
     def record_usage(self, usage: dict | None, model: str = ""):
-        """记录一次 LLM 调用消耗。usage 为 None 时只累计调用次数。"""
+        """记录一次 LLM 调用消耗。usage 为 None 时只累计调用次数。
+
+        S-中-5：内存实时累计，落盘改为节流（≥30s 一次），避免高并发
+        下每次调用都触发文件 I/O 与锁竞争；进程退出时由 flush 兜底。
+        """
         with self._usage_lock:
             self._usage["calls"] += 1
             if model:
@@ -74,6 +85,14 @@ class AgentGateway:
                 self._usage["total_tokens"] += int(usage.get("total_tokens") or 0)
             if not self._usage["since"]:
                 self._usage["since"] = time.time()
+            should_save = (time.time() - self._last_usage_save) >= _USAGE_SAVE_INTERVAL
+        if should_save:
+            self._save_usage()
+
+    def flush_usage(self):
+        """立即落盘用量（进程退出时调用，S-中-5 兜底）。"""
+        with self._usage_lock:
+            self._last_usage_save = time.time()
         self._save_usage()
 
     def get_token_usage(self) -> dict:
@@ -106,7 +125,12 @@ class AgentGateway:
             self.register(a)
 
     # ── 主调用入口 ────────────────────────────────────────
-    async def invoke(self, agent_name: str, context: dict) -> dict:
+    async def invoke(self, agent_name: str, context: dict, llm: LLMClient | None = None) -> dict:
+        """调用指定 agent。
+
+        llm 显式传参（P0-1 修复）：不再读取/改写全局 self.llm，避免跨用户
+        密钥串扰与异步竞态。llm 为 None 时直接走模板降级。
+        """
         agent = self.agents.get(agent_name)
         if agent is None:
             return {"error": f"Unknown agent '{agent_name}'"}
@@ -114,7 +138,7 @@ class AgentGateway:
         log_entry = {"agent": agent_name, "input": context, "timestamp": time.time(), "method": "template", "retries": 0}
         last_error = ""
 
-        if self.llm and hasattr(agent, "build_prompt"):
+        if llm and hasattr(agent, "build_prompt"):
             prompt = agent.build_prompt(context)
             if prompt:
                 # 检查未填充的占位符
@@ -124,7 +148,7 @@ class AgentGateway:
 
                 suffix = f"...(共 {len(prompt)} 字符)..." if len(prompt) > 400 else ""
                 logger.info(f"Agent '{agent_name}' prompt: {prompt[:200]}{suffix}{prompt[-200:] if len(prompt) > 400 else ''}")
-                logger.info(f"Agent '{agent_name}' → POST {self.llm.endpoint} model={self.llm.model}")
+                logger.info(f"Agent '{agent_name}' → POST {llm.endpoint} model={llm.model}")
 
                 schema = getattr(agent, "output_schema", None)
                 schema_instruction = _schema_to_prompt(schema)
@@ -132,12 +156,12 @@ class AgentGateway:
 
                 for attempt in range(1, MAX_RETRIES + 1):
                     try:
-                        raw = await self.llm.chat_json([
+                        raw = await llm.chat_json([
                             {"role": "system", "content": system_msg},
                             {"role": "user", "content": prompt},
                         ])
                         # 无论 JSON 是否解析成功，HTTP 调用已消耗 token
-                        self.record_usage(self.llm.last_usage, self.llm.model)
+                        self.record_usage(llm.last_usage, llm.model)
                         if raw and not raw.get("error"):
                             validated = self._validate_and_repair(agent, raw)
                             if validated:
@@ -222,13 +246,11 @@ class AgentGateway:
         return all(k in raw for k in schema.get("required", []))
 
     def get_call_log(self, limit: int = 50) -> list[dict]:
-        return self._call_log[-limit:]
+        # deque 不支持切片，先转 list 再取尾部（S-中-4）
+        return list(self._call_log)[-limit:]
 
     def clear_log(self):
         self._call_log.clear()
-
-    def set_llm(self, llm: LLMClient | None):
-        self.llm = llm
 
 
 # ═══════════════════════════════════════════════════════════
@@ -327,9 +349,17 @@ _gateway: AgentGateway | None = None
 
 
 def get_gateway(llm: LLMClient | None = None) -> AgentGateway:
+    """获取全局 AgentGateway 单例。
+
+    P0-1 修复：不再把传入的 llm 写入全局状态（`set_llm` 已移除）——
+    LLM 客户端一律通过 `invoke(..., llm=llm)` 显式传参，避免跨用户密钥
+    串扰与异步竞态。参数保留仅为兼容旧调用，实际忽略。
+    """
     global _gateway
     if _gateway is None:
-        _gateway = AgentGateway(llm)
+        _gateway = AgentGateway()
+        import atexit
+        atexit.register(_gateway.flush_usage)  # S-中-5：进程退出时落盘用量兜底
         from app.agents.research_mentor import ResearchMentor
         from app.agents.experiment_designer import ExperimentDesigner
         from app.agents.data_analyst import DataAnalyst
@@ -340,6 +370,4 @@ def get_gateway(llm: LLMClient | None = None) -> AgentGateway:
             ResearchMentor(), ExperimentDesigner(), DataAnalyst(),
             ReflectionAgent(), Reviewer(), AlgorithmTutor(),
         ])
-    if llm is not None:
-        _gateway.set_llm(llm)
     return _gateway

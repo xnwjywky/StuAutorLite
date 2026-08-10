@@ -1,7 +1,6 @@
 """日志工具 — 同时输出到控制台 + agent_errors.log 文件"""
 
 import logging
-import os
 from pathlib import Path
 
 LOG_DIR = Path(__file__).resolve().parent.parent.parent / "logs"

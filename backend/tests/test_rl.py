@@ -105,6 +105,7 @@ class TestSARSAAgent:
 
 
 class TestRLRunner:
+    @pytest.mark.slow
     def test_basic_run(self):
         runner = RLRunner()
         result = runner.run({
@@ -117,6 +118,7 @@ class TestRLRunner:
         assert "Q_LEARNING" in result["summary"]
         assert "SARSA" in result["summary"]
 
+    @pytest.mark.slow
     def test_single_agent(self):
         runner = RLRunner()
         result = runner.run({
@@ -135,6 +137,7 @@ class TestRLRunner:
         assert env1.gold == env2.gold
         assert env1.traps == env2.traps
 
+    @pytest.mark.slow
     def test_run_fields_complete(self):
         runner = RLRunner()
         result = runner.run({
@@ -149,6 +152,7 @@ class TestRLRunner:
         assert len(r["train_rewards"]) == 100
         assert len(r["test_path"]) >= 1
 
+    @pytest.mark.slow
     def test_summary_aggregation(self):
         runner = RLRunner()
         result = runner.run({
@@ -166,6 +170,7 @@ class TestRLRunner:
 class TestEvalCompare:
     """eval_compare 轨迹对比 + 策略快照"""
 
+    @pytest.mark.slow
     def test_returns_all_keys(self):
         runner = RLRunner()
         result = runner.run_eval_compare({
@@ -179,8 +184,9 @@ class TestEvalCompare:
             assert key in result, f"Missing key: {key}"
         assert result["status"] == "COMPLETED"
 
+    @pytest.mark.slow
     def test_compare_decisions_structure(self):
-        """验证每步决策包含 Q 值详情。"""
+        """验证每步决策包含 Q 值详情（100 轮训练 → slow，默认跳过）"""
         runner = RLRunner()
         result = runner.run_eval_compare({
             "agents": ["Q_LEARNING"], "grid_size": 6, "num_traps": 2,

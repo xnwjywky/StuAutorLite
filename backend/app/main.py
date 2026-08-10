@@ -1,13 +1,19 @@
 """FastAPI 入口"""
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.auth import verify_app_key
 from app.api.routes import sessions, questions, experiments, analysis, reports, agents, reflection, classify, guessnumber, sorting, stringsearch, shaperecog, digits, imagerecog, mnist, rl
 from app.models.database import init_db
 from app.config import settings
+from app.utils.rate_limit import rate_limit_middleware
 
 app = FastAPI(title=settings.app_name, debug=settings.debug)
+
+# 全站轻量鉴权（P0-2）：APP_KEY 配置后所有 /api 路由须带 X-App-Key；
+# 未配置时依赖自动放行（默认开发态，向后兼容）。
+_API_DEPENDENCIES = [Depends(verify_app_key)]
 
 
 # ── 请求日志中间件（所有入站请求均记录到控制台 + app.log）──
@@ -34,32 +40,49 @@ async def log_requests(request, call_next):
     return response
 
 
-# CORS 中间件（开发阶段允许所有来源）
+# S-中-3：简单 IP 限流中间件（RATE_LIMIT_PER_MINUTE=0 时关闭）
+app.middleware("http")(rate_limit_middleware)
+
+
+# CORS 中间件（P1-3 修复 + 局域网回归修复）：
+# - allow_credentials=False（项目鉴权走请求头，无 cookie/session，凭据不需要）
+# - allow_origins = 显式配置的来源（cors_origins，默认本机前端开发源）
+# - allow_origin_regex = 额外放行 回环 + 局域网私有网段（10./172.16-31./192.168.）
+#   任意端口 —— 覆盖 README 支持的「局域网其他设备经 <本机IP>:5173 访问」场景，
+#   避免浏览器因缺 Access-Control-Allow-Origin 头报 Network Error。
+# 显式域名（如 https://你的域名）请在 CORS_ORIGINS 中配置。
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
+    allow_origin_regex=(
+        r"https?://(?:localhost|127\.0\.0\.1|"
+        r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+        r"192\.168\.\d{1,3}\.\d{1,3}|"
+        r"172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})"
+        r"(?::\d+)?$"
+    ),
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 注册路由
-app.include_router(sessions.router, prefix="/api")
-app.include_router(questions.router, prefix="/api")
-app.include_router(experiments.router, prefix="/api")
-app.include_router(analysis.router, prefix="/api")
-app.include_router(reports.router, prefix="/api")
-app.include_router(reflection.router, prefix="/api")
-app.include_router(agents.router, prefix="/api")
-app.include_router(classify.router, prefix="/api")
-app.include_router(guessnumber.router, prefix="/api")
-app.include_router(sorting.router, prefix="/api")
-app.include_router(stringsearch.router, prefix="/api")
-app.include_router(shaperecog.router, prefix="/api")
-app.include_router(digits.router, prefix="/api")
-app.include_router(imagerecog.router, prefix="/api")
-app.include_router(mnist.router, prefix="/api")
-app.include_router(rl.router, prefix="/api")
+# 注册路由（P0-2：全部 /api 路由应用鉴权依赖）
+app.include_router(sessions.router, prefix="/api", dependencies=_API_DEPENDENCIES)
+app.include_router(questions.router, prefix="/api", dependencies=_API_DEPENDENCIES)
+app.include_router(experiments.router, prefix="/api", dependencies=_API_DEPENDENCIES)
+app.include_router(analysis.router, prefix="/api", dependencies=_API_DEPENDENCIES)
+app.include_router(reports.router, prefix="/api", dependencies=_API_DEPENDENCIES)
+app.include_router(reflection.router, prefix="/api", dependencies=_API_DEPENDENCIES)
+app.include_router(agents.router, prefix="/api", dependencies=_API_DEPENDENCIES)
+app.include_router(classify.router, prefix="/api", dependencies=_API_DEPENDENCIES)
+app.include_router(guessnumber.router, prefix="/api", dependencies=_API_DEPENDENCIES)
+app.include_router(sorting.router, prefix="/api", dependencies=_API_DEPENDENCIES)
+app.include_router(stringsearch.router, prefix="/api", dependencies=_API_DEPENDENCIES)
+app.include_router(shaperecog.router, prefix="/api", dependencies=_API_DEPENDENCIES)
+app.include_router(digits.router, prefix="/api", dependencies=_API_DEPENDENCIES)
+app.include_router(imagerecog.router, prefix="/api", dependencies=_API_DEPENDENCIES)
+app.include_router(mnist.router, prefix="/api", dependencies=_API_DEPENDENCIES)
+app.include_router(rl.router, prefix="/api", dependencies=_API_DEPENDENCIES)
 
 
 @app.on_event("startup")

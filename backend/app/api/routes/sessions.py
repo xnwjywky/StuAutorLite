@@ -1,6 +1,5 @@
 """研究会话 CRUD — 设计文档 §11.1"""
 
-import json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session as DbSession
 

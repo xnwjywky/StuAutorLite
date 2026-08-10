@@ -63,8 +63,8 @@ async def invoke_agent(
     x_api_provider: str | None = Header(None),
 ):
     llm = _build_llm(x_api_key, x_api_base, x_api_model, x_api_provider)
-    gw = get_gateway(llm)
-    result = await gw.invoke(agent_name, req.context)
+    gw = get_gateway()
+    result = await gw.invoke(agent_name, req.context, llm=llm)
     return {"agent_name": agent_name, "result": result}
 
 
@@ -80,8 +80,8 @@ async def mentor_suggest(
     x_api_base: str | None = Header(None),
     x_api_model: str | None = Header(None),
 ):
-    gw = get_gateway(_build_llm(x_api_key, x_api_base, x_api_model))
-    return {"agent_name": "research_mentor", "result": await gw.invoke("research_mentor", req.context)}
+    gw = get_gateway()
+    return {"agent_name": "research_mentor", "result": await gw.invoke("research_mentor", req.context, llm=_build_llm(x_api_key, x_api_base, x_api_model))}
 
 
 @router.post("/experiment-designer/review")
@@ -91,8 +91,8 @@ async def experiment_designer_review(
     x_api_base: str | None = Header(None),
     x_api_model: str | None = Header(None),
 ):
-    gw = get_gateway(_build_llm(x_api_key, x_api_base, x_api_model))
-    return {"agent_name": "experiment_designer", "result": await gw.invoke("experiment_designer", req.context)}
+    gw = get_gateway()
+    return {"agent_name": "experiment_designer", "result": await gw.invoke("experiment_designer", req.context, llm=_build_llm(x_api_key, x_api_base, x_api_model))}
 
 
 @router.post("/data-analyst/analyze")
@@ -102,8 +102,8 @@ async def data_analyst_analyze(
     x_api_base: str | None = Header(None),
     x_api_model: str | None = Header(None),
 ):
-    gw = get_gateway(_build_llm(x_api_key, x_api_base, x_api_model))
-    return {"agent_name": "data_analyst", "result": await gw.invoke("data_analyst", req.context)}
+    gw = get_gateway()
+    return {"agent_name": "data_analyst", "result": await gw.invoke("data_analyst", req.context, llm=_build_llm(x_api_key, x_api_base, x_api_model))}
 
 
 @router.post("/reflection/reflect")
@@ -113,8 +113,8 @@ async def reflection_reflect(
     x_api_base: str | None = Header(None),
     x_api_model: str | None = Header(None),
 ):
-    gw = get_gateway(_build_llm(x_api_key, x_api_base, x_api_model))
-    return {"agent_name": "reflection", "result": await gw.invoke("reflection", req.context)}
+    gw = get_gateway()
+    return {"agent_name": "reflection", "result": await gw.invoke("reflection", req.context, llm=_build_llm(x_api_key, x_api_base, x_api_model))}
 
 
 @router.post("/reviewer/review")
@@ -124,8 +124,8 @@ async def reviewer_review(
     x_api_base: str | None = Header(None),
     x_api_model: str | None = Header(None),
 ):
-    gw = get_gateway(_build_llm(x_api_key, x_api_base, x_api_model))
-    return {"agent_name": "reviewer", "result": await gw.invoke("reviewer", req.context)}
+    gw = get_gateway()
+    return {"agent_name": "reviewer", "result": await gw.invoke("reviewer", req.context, llm=_build_llm(x_api_key, x_api_base, x_api_model))}
 
 
 @router.post("/algorithm-tutor/explain")
@@ -135,8 +135,8 @@ async def algorithm_tutor_explain(
     x_api_base: str | None = Header(None),
     x_api_model: str | None = Header(None),
 ):
-    gw = get_gateway(_build_llm(x_api_key, x_api_base, x_api_model))
-    return {"agent_name": "algorithm_tutor", "result": await gw.invoke("algorithm_tutor", req.context)}
+    gw = get_gateway()
+    return {"agent_name": "algorithm_tutor", "result": await gw.invoke("algorithm_tutor", req.context, llm=_build_llm(x_api_key, x_api_base, x_api_model))}
 
 
 @router.post("/general/chat")

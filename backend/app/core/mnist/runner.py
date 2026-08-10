@@ -15,7 +15,29 @@ import subprocess
 import platform
 import os
 import logging
+import threading
 from pathlib import Path
+
+# ── 训练取消机制 ─────────────────────────────────────────
+# 前端退出运行实验页时调用 /api/mnist/cancel 设置该事件，
+# 训练循环每 batch 检查，尽快中止训练并释放全局互斥锁（避免"已有训练正在进行"卡死）。
+_cancel_event = threading.Event()
+
+
+class TrainingCancelledError(RuntimeError):
+    """训练被用户主动取消（前端退出运行页）。"""
+
+
+def request_cancel() -> None:
+    _cancel_event.set()
+
+
+def clear_cancel() -> None:
+    _cancel_event.clear()
+
+
+def is_cancelled() -> bool:
+    return _cancel_event.is_set()
 
 # ── 训练专用日志（仅写文件，不输出到控制台）──
 _LOG_DIR = Path(__file__).resolve().parent.parent.parent.parent / "logs"
@@ -386,14 +408,16 @@ class MNISTRunner:
         import torch.optim as optim
 
         opt_type = hp.get("optimizer", "SGD").upper()
-        lr = hp.get("learning_rate", 0.01)
+        # P0-2（MNIST_ACCURACY_FIX）：兼容前端 camelCase 与后端 snake_case
+        lr = hp.get("learning_rate", hp.get("learningRate", 0.01))
         if opt_type == "ADAM":
             return optim.Adam(model.parameters(), lr=lr)
         elif opt_type == "RMSPROP":
             return optim.RMSprop(model.parameters(), lr=lr)
         else:
             return optim.SGD(
-                model.parameters(), lr=lr, momentum=hp.get("momentum", 0.9)
+                model.parameters(), lr=lr,
+                momentum=hp.get("momentum", hp.get("Momentum", 0.9)),
             )
 
     @staticmethod
@@ -591,8 +615,10 @@ class MNISTRunner:
         np.random.seed(seed)
 
         device, device_diag = _detect_device()
-        epochs = hp.get("epochs", 10)
-        batch_size = hp.get("batch_size", 64)
+        # P0-2（MNIST_ACCURACY_FIX）：兼容前端 camelCase 与后端 snake_case，
+        # 否则用户改 lr/batch_size 不生效（恒为默认值）
+        epochs = hp.get("epochs", hp.get("Epochs", 10))
+        batch_size = hp.get("batch_size", hp.get("batchSize", 64))
         transform = self._get_transform()
 
         _train_log.info("=" * 50)
@@ -740,6 +766,9 @@ class MNISTRunner:
                 total_batches = len(train_loader)
                 last_progress_time = time.time()
                 for batch_idx, (data, target) in enumerate(train_loader):
+                    # 训练取消检查：前端退出运行页时置位，尽快中止（一个 batch 内即生效）
+                    if is_cancelled():
+                        raise TrainingCancelledError("训练已被取消（前端退出运行实验页）")
                     try:
                         data, target = data.to(device), target.to(device)
                     except Exception as e:

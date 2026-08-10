@@ -1,5 +1,5 @@
 """手写数字像素数据生成器 — 简化 0-9 数字模板 + 可控噪声"""
-import random, math
+import random
 
 DIGITS = list(range(10))
 SIZE = 16  # 16×16 像素网格

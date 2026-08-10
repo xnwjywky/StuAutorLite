@@ -156,9 +156,9 @@ function buildReportPolishPrompt(ctx: Record<string, unknown>): string {
   return `请根据以下学生研究报告内容，帮助润色语言使其更流畅清晰，但保留学生的原始思考和关键回答。直接返回润色后的完整 Markdown 报告。\n\n${JSON.stringify(ctx)}`;
 }
 
-/** 检查是否已配置任何 Agent */
+/** 检查是否已配置任何 Agent（P1-5：key 存 sessionStorage，与 store 保持一致） */
 export function hasAgentConfig(): boolean {
-  try { const raw = localStorage.getItem("stuautor_agent_configs"); return !!raw && JSON.parse(raw).some((c: any) => c.apiKey); } catch { return false; }
+  try { const raw = sessionStorage.getItem("stuautor_agent_configs"); return !!raw && JSON.parse(raw).some((c: any) => c.apiKey); } catch { return false; }
 }
 
 /** Token 使用量统计（累计 LLM 调用消耗） */

@@ -12,31 +12,6 @@ STAGES = [
     "REVIEW_COMPLETED",
 ]
 
-
-class WorkflowOrchestrator:
-    """科研流程状态机"""
-
-    @staticmethod
-    def next_stage(current: str) -> str | None:
-        try:
-            idx = STAGES.index(current)
-            return STAGES[idx + 1] if idx + 1 < len(STAGES) else None
-        except ValueError:
-            return None
-
-    @staticmethod
-    def prev_stage(current: str) -> str | None:
-        try:
-            idx = STAGES.index(current)
-            return STAGES[idx - 1] if idx > 0 else None
-        except ValueError:
-            return None
-
-    @staticmethod
-    def get_all_stages() -> list[dict]:
-        return [{"key": s, "label": STAGE_LABELS.get(s, s)} for s in STAGES]
-
-
 STAGE_LABELS = {
     "TASK_SELECTED": "选择研究任务",
     "QUESTION_DEFINED": "确定研究问题",

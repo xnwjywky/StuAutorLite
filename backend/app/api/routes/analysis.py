@@ -1,9 +1,9 @@
 """结果分析路由 — 设计文档 §11.6"""
 
 import json
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session as DbSession
-from app.models.database import get_db, AnalysisRecord, ExperimentRun, Session as SessionModel, Hypothesis
+from app.models.database import get_db, AnalysisRecord, ExperimentRun, Session as SessionModel
 from app.models.schemas import AnalysisCreate, AnalysisAnalyzeRequest
 from app.agents.data_analyst import DataAnalyst
 

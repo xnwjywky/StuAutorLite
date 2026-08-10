@@ -1,4 +1,4 @@
-/** Agent LLM 配置 Store — 多配置共享，localStorage 持久化 */
+/** Agent LLM 配置 Store — 多配置共享，sessionStorage 持久化 */
 
 import { create } from "zustand";
 
@@ -29,14 +29,15 @@ export const AGENT_NAMES = [
 ] as const;
 
 // ═══════════════════════════════════════════════════════════
-// 工具
+// 工具（P1-5 修复：API Key 属敏感信息，改用 sessionStorage——
+// 关闭标签页即清除，避免明文长期落盘于 localStorage）
 // ═══════════════════════════════════════════════════════════
 
 const STORAGE_KEY = "stuautor_agent_configs";
 
 function loadConfigs(): AgentConfig[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = sessionStorage.getItem(STORAGE_KEY);
     if (raw) {
       const configs: AgentConfig[] = JSON.parse(raw);
       for (const c of configs) {
@@ -54,7 +55,7 @@ function loadConfigs(): AgentConfig[] {
 }
 
 function saveConfigs(configs: AgentConfig[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(configs));
+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(configs));
 }
 
 /** 对指定 agent 查找配置：先找专属配置，再找默认共享配置，都没有则返回 null */

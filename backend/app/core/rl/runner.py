@@ -2,7 +2,7 @@
 
 复用模式：与 sorting/runner.py 一致的结构。
 """
-import time, copy
+import time
 from .gridworld import GridWorld
 from .agents import RLAgent, QLearningAgent, SARSAAgent
 

@@ -23,6 +23,10 @@ backend/data/*.sqlite
 backend/data/*.db-wal
 backend/data/*.db-shm
 
+# Runtime data (auto-downloaded / auto-generated, do NOT commit)
+backend/data/MNIST/
+backend/data/models/*.pth
+
 # Token usage runtime state
 backend/data/token_usage.json
 

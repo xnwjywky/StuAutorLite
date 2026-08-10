@@ -1,7 +1,7 @@
 """MNIST 手写数字识别实验 API"""
 import json, uuid, asyncio, logging
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session as DbSession
 from pydantic import BaseModel, Field
@@ -110,6 +110,13 @@ def get_architectures():
 
 @router.post("/run")
 def run_mnist(req: MNISTRunRequest, db: DbSession = Depends(get_db)):
+    from app.core.mnist.model_manager import ModelManager
+
+    # P0-1（MNIST_ACCURACY_FIX）：全局训练互斥——等待其它训练（含后台预训练）
+    # 完成，最多 30s；否则返回 409。杜绝 torch CPU 并发训练数据竞争。
+    if not ModelManager.acquire_training(timeout=30.0):
+        raise HTTPException(status_code=409, detail="已有训练正在进行，请稍后再试")
+
     config = {
         "architecture": req.architecture,
         "hyperparameters": req.hyperparameters,
@@ -127,6 +134,8 @@ def run_mnist(req: MNISTRunRequest, db: DbSession = Depends(get_db)):
     except Exception as e:
         _mnist_log.error(f"训练失败: {str(e)}")
         raise HTTPException(status_code=400, detail=f"MNIST 训练失败: {str(e)}")
+    finally:
+        ModelManager.release_training()
 
     r0 = result["runs"][0]
     run = MNISTRun(
@@ -156,7 +165,9 @@ def run_mnist(req: MNISTRunRequest, db: DbSession = Depends(get_db)):
 
 
 @router.post("/run-stream")
-async def run_mnist_stream(req: MNISTRunRequest):
+async def run_mnist_stream(req: MNISTRunRequest, request: Request):
+    from app.core.mnist.model_manager import ModelManager
+
     _mnist_log.info(
         "SSE stream start: session=%d arch=%s epochs=%d",
         req.session_id, req.architecture.get("id", "?"), req.hyperparameters.get("epochs", 10),
@@ -170,9 +181,25 @@ async def run_mnist_stream(req: MNISTRunRequest):
 
     async def event_stream():
         loop = asyncio.get_event_loop()
-        gen = runner.run_stream(config)
+        # P0-1（MNIST_ACCURACY_FIX）：前端实际训练走本端点（SSE），必须与后台预训练
+        # 共用全局互斥——忙时等待最多 30s，仍忙则以 error 事件告知。锁覆盖整个事件流
+        # （SSE 惰性生成，训练在迭代时执行），finally 保证正常/异常/断开都释放。
+        if not await loop.run_in_executor(None, ModelManager.acquire_training, 30.0):
+            yield f"data: {json.dumps({'type':'error','message':'已有训练正在进行，请稍后再试'}, ensure_ascii=False)}\n\n"
+            return
+        # 新训练干净启动：清掉可能残留的取消事件（上次退出时若没有在跑的训练，
+        # /cancel 置位的事件不会被任何 event_stream 清理），否则首 batch 即被误判"已取消"
+        from app.core.mnist.runner import clear_cancel
+
+        clear_cancel()
         try:
+            gen = runner.run_stream(config)
             while True:
+                # 客户端断开检测：中途退出（刷新/返回上一步）时及时中止并释放锁，
+                # 避免下次进入训练时 acquire 等待旧锁超时导致"卡死"
+                if await request.is_disconnected():
+                    _mnist_log.info("SSE client disconnected, aborting training")
+                    break
                 event = await loop.run_in_executor(None, next, gen)
                 payload = json.dumps(event, ensure_ascii=False, default=str)
                 yield f"data: {payload}\n\n"
@@ -185,12 +212,35 @@ async def run_mnist_stream(req: MNISTRunRequest):
         except Exception as e:
             _mnist_log.error(f"SSE stream crashed: {e}", exc_info=True)
             yield f"data: {json.dumps({'type':'error','message':f'训练异常: {str(e)[:500]}'}, ensure_ascii=False)}\n\n"
+        finally:
+            # 清理取消事件并同步释放互斥锁（不能 await：SSE 生成器被 aclose
+            # 抛 GeneratorExit 时禁止 await，否则 release 不执行 → 锁泄漏，
+            # 表现为"已有训练正在进行，请稍后再试"一直卡住）
+            from app.core.mnist.runner import clear_cancel
+
+            clear_cancel()
+            ModelManager.release_training()
 
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post("/cancel")
+def cancel_training():
+    """取消当前训练：前端退出运行实验页时调用，置位取消事件。
+
+    训练循环每 batch 检查该事件，尽快中止并释放全局互斥锁，
+    避免"已有训练正在进行，请稍后再试"一直卡住后续使用。
+    """
+    from app.core.mnist.runner import request_cancel, clear_cancel
+
+    request_cancel()
+    # 取消事件由下一次 /run-stream 的 finally 清理（clear_cancel），
+    # 这里不清理，保证已开始的训练能感知到取消。
+    return {"cancelled": True}
 
 
 @router.get("/runs")
@@ -245,10 +295,18 @@ async def infer_upload_image(
     返回: {model_id, predicted, confidence, probabilities, model_name}
     """
     from app.core.mnist.model_manager import (
+        ALLOWED_MODEL_IDS,
         ModelManager,
         preprocess_upload_image,
         run_inference,
     )
+
+    # P1-6：model_id 白名单校验（防路径遍历），非法值直接 400
+    if model_id not in ALLOWED_MODEL_IDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"非法的 model_id（允许: {', '.join(sorted(ALLOWED_MODEL_IDS))}）",
+        )
 
     mgr = ModelManager.get_instance()
 
@@ -260,8 +318,11 @@ async def infer_upload_image(
         device_str = "cpu"
         device_diag = {"warnings": []}
 
-    # 1. 预处理图片
-    image_bytes = await file.read()
+    # 1. 预处理图片（S-中-3：限制上传大小，防内存压力）
+    MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5MB
+    image_bytes = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(image_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="图片过大（上限 5MB）")
     image_tensor = preprocess_upload_image(image_bytes, device=device_str)
     if image_tensor is None:
         raise HTTPException(status_code=400, detail="图片预处理失败，请确认上传的是手写数字图片")

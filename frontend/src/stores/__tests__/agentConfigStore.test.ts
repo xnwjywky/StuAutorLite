@@ -4,7 +4,7 @@ import { useAgentConfigStore, getConfigForAgent, maskApiKey, AGENT_NAMES } from 
 
 describe("agentConfigStore", () => {
   beforeEach(() => {
-    localStorage.clear();
+    sessionStorage.clear();
     useAgentConfigStore.getState().load();
   });
 
@@ -24,7 +24,7 @@ describe("agentConfigStore", () => {
     expect(useAgentConfigStore.getState().configs).toHaveLength(1);
     expect(useAgentConfigStore.getState().configs[0].label).toBe("测试 Key");
     // 验证持久化
-    const saved = JSON.parse(localStorage.getItem("stuautor_agent_configs")!);
+    const saved = JSON.parse(sessionStorage.getItem("stuautor_agent_configs")!);
     expect(saved).toHaveLength(1);
   });
 
@@ -71,12 +71,12 @@ describe("agentConfigStore", () => {
       });
     }
     expect(useAgentConfigStore.getState().configs).toHaveLength(5);
-    const saved = JSON.parse(localStorage.getItem("stuautor_agent_configs")!);
+    const saved = JSON.parse(sessionStorage.getItem("stuautor_agent_configs")!);
     expect(saved).toHaveLength(5);
   });
 
-  it("load 从 localStorage 重新加载", () => {
-    localStorage.setItem("stuautor_agent_configs", JSON.stringify([{
+  it("load 从 sessionStorage 重新加载", () => {
+    sessionStorage.setItem("stuautor_agent_configs", JSON.stringify([{
       id: "saved", label: "已保存", apiKey: "sk-saved", baseUrl: "", model: "", provider: "openai", agentNames: [], createdAt: 0,
     }]));
     useAgentConfigStore.getState().load();
@@ -87,7 +87,7 @@ describe("agentConfigStore", () => {
 
 describe("getConfigForAgent", () => {
   beforeEach(() => {
-    localStorage.clear();
+    sessionStorage.clear();
   });
 
   it("无配置时返回 null", () => {
@@ -96,7 +96,7 @@ describe("getConfigForAgent", () => {
 
   it("优先返回专属配置", () => {
     const cfg = { id: "1", label: "专属", apiKey: "sk-a", baseUrl: "http://x", model: "m", provider: "openai", agentNames: ["research_mentor"], createdAt: 0 };
-    localStorage.setItem("stuautor_agent_configs", JSON.stringify([cfg]));
+    sessionStorage.setItem("stuautor_agent_configs", JSON.stringify([cfg]));
     const r = getConfigForAgent("research_mentor");
     expect(r?.label).toBe("专属");
   });

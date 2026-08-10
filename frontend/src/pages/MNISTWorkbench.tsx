@@ -262,7 +262,7 @@ function Stage2() {
   const archInfo = ARCH_LAYERS[store.selectedArchitecture] || ARCH_LAYERS.standardcnn;
 
   return (
-    <StageContainer step={2} title="设计实验" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("TASK_SELECTED")}>← 上一步</button><button className="btn-primary" onClick={() => { store.set({ resultFingerprint: computeConfigFingerprint(store.selectedArchitecture, store.hyperparameters) }); store.setStage("EXPERIMENT_RUNNING"); }}>下一步 → 运行实验</button></div>}>
+    <StageContainer step={2} title="设计实验" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("TASK_SELECTED")}>← 上一步</button><button className="btn-primary" onClick={() => { store.setStage("EXPERIMENT_RUNNING"); }}>下一步 → 运行实验</button></div>}>
       <div className="card">
         <h2 className="font-semibold text-gray-700 mb-3">网络架构设计器</h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
@@ -361,10 +361,15 @@ function Stage3() {
   const hp = store.hyperparameters;
   const displayCurve = curveData.length > 0 ? curveData : store.trainingCurve;
 
-  // 卸载时 abort
+  // 卸载时 abort + 通知后端取消训练（fire-and-forget）：
+  // 未完成的训练会在下一个 batch 处中止并释放互斥锁，避免"已有训练正在进行"卡住后续使用
   useEffect(() => {
     return () => {
       if (abortRef.current) abortRef.current.abort();
+      const sid = store.sessionId;
+      if (sid != null) {
+        fetch(`${detectBaseUrl()}/api/mnist/cancel`, { method: "POST" }).catch(() => {});
+      }
     };
   }, []);
 
@@ -377,10 +382,19 @@ function Stage3() {
       setCurEpoch(store.trainingCurve.length > 0 ? store.trainingCurve[store.trainingCurve.length - 1].epoch : 0);
       setTotEpochs(store.hyperparameters.epochs);
       doneRef.current = true;
-    } else if (store.experimentResult && store.resultFingerprint !== currentFp) {
-      // 配置已变 → 清除
-      store.set({ experimentResult: null, trainingCurve: [], resultFingerprint: "" });
-      setCurveData([]);
+    } else {
+      // 无已完成结果（含上次训练中断残留）→ 重置训练状态，重新开始、不做断点重训
+      if (store.isTraining) store.set({ isTraining: false });
+      if (store.experimentResult && store.resultFingerprint !== currentFp) {
+        // 配置已变 → 清除上方训练区结果，并删除旧用户模型（对应旧配置）：
+        // 模型选择下拉框的轮询会随之把「我的训练模型」刷新为未就绪，与上方训练区一致
+        store.set({ experimentResult: null, trainingCurve: [], resultFingerprint: "" });
+        setCurveData([]);
+        const sid = store.sessionId;
+        if (sid != null) {
+          fetch(`${detectBaseUrl()}/api/mnist/user-model?session_id=${sid}`, { method: "DELETE" }).catch(() => {});
+        }
+      }
     }
   }, []);
 
@@ -398,6 +412,12 @@ function Stage3() {
     setPhaseText("正在连接后端服务...");
     curveRef.current = [];
     store.set({ isTraining: true });
+    // 重新训练时重置「我的模型状态」：删除该 session 的旧用户模型，
+    // 让 model-status 轮询显示为「未就绪」，新模型训练完成后再恢复就绪。
+    if (store.sessionId != null) {
+      const sid = store.sessionId;
+      fetch(`${detectBaseUrl()}/api/mnist/user-model?session_id=${sid}`, { method: "DELETE" }).catch(() => {});
+    }
     // 异步启动（不 await，让 UI 先渲染）
     doTrain();
   };

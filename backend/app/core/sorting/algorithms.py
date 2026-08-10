@@ -2,7 +2,6 @@
 
 每个算法的 solve() 返回完整步骤序列，供前端逐帧动画渲染。
 """
-import random
 
 
 def bubble_sort(arr: list[int]) -> dict:

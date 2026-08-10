@@ -6,7 +6,7 @@ import sys
 # 确保 backend 在 path 中
 sys.path.insert(0, os.path.dirname(__file__))
 
-from app.models.database import Base, engine, SessionLocal, init_db
+from app.models.database import SessionLocal, init_db
 from app.main import app as fastapi_app
 from httpx import ASGITransport, AsyncClient
 

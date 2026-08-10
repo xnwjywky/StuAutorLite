@@ -2,7 +2,6 @@
 
 每个算法返回完整步骤序列供前端动画渲染。
 """
-import time
 
 
 def naive_search(text: str, pattern: str) -> dict:

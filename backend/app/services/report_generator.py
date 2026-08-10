@@ -43,11 +43,6 @@ class ReportGenerator:
         ]
         return "\n".join(lines)
 
-    @staticmethod
-    def export_pdf(markdown_content: str) -> bytes:
-        """占位 — 后续可集成 weasyprint"""
-        return markdown_content.encode("utf-8")
-
 
 def _build_result_table(summary: dict) -> str:
     if not summary:

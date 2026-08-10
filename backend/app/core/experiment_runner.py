@@ -9,7 +9,7 @@ from .algorithms.dijkstra import Dijkstra
 from .algorithms.greedy import GreedyBestFirst
 from .algorithms.bidirectional import BidirectionalBFS
 from .algorithms.iddfs import IDDFS
-from .metrics import compute_metrics, compute_summary_by_algorithm
+from .metrics import compute_summary_by_algorithm
 
 ALGORITHMS = {
     "BFS": BFS(),

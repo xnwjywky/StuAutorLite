@@ -69,16 +69,18 @@ class TestAlgorithms:
         acc = sum(1 for p, t in zip(preds, l[n_train:])) / len(preds)
         assert acc >= 0.70, f"Decision tree accuracy={acc:.2f} below 0.70"
 
+    @pytest.mark.slow
     def test_mlp_noiseless(self):
-        """MLP 在无噪声数据上应达到较高准确率"""
+        """MLP 在无噪声数据上应达到较高准确率（真实训练 → slow，默认跳过）"""
         g, l = self._make_data(120)
         n_train = 90
         preds = [mlp_classify(g[:n_train], l[:n_train], g[i]) for i in range(n_train, len(g))]
         acc = sum(1 for p, t in zip(preds, l[n_train:])) / len(preds)
         assert acc >= 0.75, f"MLP accuracy={acc:.2f} below 0.75"
 
+    @pytest.mark.slow
     def test_cnn_noiseless(self):
-        """CNN 在无噪声数据上应达到较高准确率"""
+        """CNN 在无噪声数据上应达到较高准确率（真实训练 → slow，默认跳过）"""
         g, l = self._make_data(120)
         n_train = 90
         preds = [cnn_classify(g[:n_train], l[:n_train], g[i]) for i in range(n_train, len(g))]
@@ -104,8 +106,9 @@ class TestRunner:
         r = ShapeRecogRunner().run({"algorithms": ["TEMPLATE"], "n_samples": 50, "noise_levels": [0.1], "num_trials": 2, "seed": 1})
         assert r["total_runs"] == 2
 
+    @pytest.mark.slow
     def test_all_new_algorithms(self):
-        """Runner 应支持所有新算法"""
+        """Runner 应支持所有新算法（含 MLP/CNN 真实训练 → slow，默认跳过）"""
         r = ShapeRecogRunner().run({
             "algorithms": ["DECISION_TREE", "MLP", "CNN"],
             "n_samples": 50, "num_trials": 1, "seed": 42,

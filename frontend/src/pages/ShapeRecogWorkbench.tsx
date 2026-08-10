@@ -80,8 +80,6 @@ async function callAgent(agentName: string, stage: string, fn: () => Promise<{ r
   }
 }
 
-const SHAPE_NAMES: Record<string, string> = { circle: "圆形", square: "正方形", triangle: "三角形" };
-
 export default function ShapeRecogWorkbench() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const store = useShapeRecogStore();

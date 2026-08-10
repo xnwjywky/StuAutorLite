@@ -231,9 +231,11 @@ export default function DecisionBoundary({
     phase === "done" ? "✅ 完成" : "";
 
   return (
-    <div className="flex flex-col items-center gap-2">
-      <canvas ref={canvasRef} className="border border-gray-200 rounded-lg shadow-sm"
-        style={{ width: CANVAS_SIZE, height: CANVAS_SIZE }} />
+    <div className="flex flex-col items-center gap-2 w-full">
+      {/* 显示尺寸自适应容器：宽度撑满卡片（受 max-width 限制），aspect-ratio 保持正方形，
+          避免小屏/单列布局下 canvas 超出卡片背景；内部绘制仍用固定 CANVAS_SIZE 坐标 */}
+      <canvas ref={canvasRef} className="border border-gray-200 rounded-lg shadow-sm w-full"
+        style={{ maxWidth: CANVAS_SIZE, aspectRatio: "1 / 1" }} />
       <div className="flex items-center gap-3 text-xs text-gray-500">
         {animate && <span>{statusText}</span>}
         {animate && phase === "done" && (

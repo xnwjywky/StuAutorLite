@@ -168,8 +168,9 @@ export default function AgentConfigPage() {
         <div className="card mt-6 border-blue-100 bg-blue-50/30">
           <h3 className="font-semibold text-sm text-gray-700 mb-2">说明</h3>
           <ul className="text-xs text-gray-500 space-y-1">
-            <li>• API Key 仅存储在浏览器本地 localStorage，不会上传到服务器</li>
-            <li>• 每次 Agent 调用时，前端将配置通过请求头发送给后端</li>
+            <li>• API Key 保存在浏览器会话存储（sessionStorage）中，关闭标签页即清除</li>
+            <li>• 每次 Agent 调用时，前端将配置（含 API Key）通过请求头发送给后端，用于调用你配置的模型服务商</li>
+            <li>• 请勿在公共电脑保存密钥；不要将 Key 分享给他人</li>
             <li>• 共享配置：不指定 Agent 则所有 Agent 共用同一个 Key</li>
             <li>• 专属配置：指定 Agent 后，只有该 Agent 使用此 Key</li>
             <li>• 查找优先级：专属配置 {'>'} 共享配置 {'>'} 第一个有效配置</li>

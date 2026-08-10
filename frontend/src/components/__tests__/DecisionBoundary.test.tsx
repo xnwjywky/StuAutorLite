@@ -27,7 +27,8 @@ describe("DecisionBoundary", () => {
     );
     expect(screen.getByText("红队")).toBeInTheDocument();
     expect(screen.getByText("蓝队")).toBeInTheDocument();
-    expect(screen.getByText("误分类")).toBeInTheDocument();
+    // 组件渲染「测试误分类」，用正则匹配避免与实现文案不一致
+    expect(screen.getByText(/误分类/)).toBeInTheDocument();
   });
 
   it("有预测时显示准确率", () => {
