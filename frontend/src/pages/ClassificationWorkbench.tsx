@@ -125,7 +125,7 @@ export default function ClassificationWorkbench() {
   return (
     <Layout>
       <div className="flex" style={{ minHeight: "calc(100vh - 56px)" }}>
-        <aside className="w-64 bg-white border-r border-gray-200 p-4 flex-shrink-0">
+        <aside className="w-64 bg-paper border-r border-gray-200 p-4 flex-shrink-0">
           <h1 className="text-lg font-bold text-gray-800 mb-2">研究工作台</h1>
           <p className="text-xs text-gray-400 mb-4">图像分类算法研究</p>
           <FlowStepper steps={STEPS} current={store.currentStage} onStepClick={(s) => {
@@ -136,7 +136,7 @@ export default function ClassificationWorkbench() {
             else store.setStage(s);
           }} />
         </aside>
-        <div className="flex-1 overflow-auto bg-gray-50"><StageRouter /></div>
+        <div className="flex-1 overflow-auto bg-paper"><StageRouter /></div>
       </div>
     </Layout>
   );

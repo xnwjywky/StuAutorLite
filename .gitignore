@@ -53,5 +53,12 @@ htmlcov/
 .nyc_output/
 frontend/coverage/
 
+# Browser test artifacts (Playwright/Puppeteer Chrome profiles & caches)
+frontend/.chrome-test/
+frontend/.chrome-test2/
+frontend/.chrome-test3/
+frontend/dist-check/
+frontend/tsconfig.tsbuildinfo
+
 # Work log (internal, not published)
 work.md

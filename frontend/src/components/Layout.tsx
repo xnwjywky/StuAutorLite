@@ -1,6 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 import { useBackendHealth } from "../hooks/useBackendHealth";
 import TokenUsageBadge from "./TokenUsageBadge";
+import ThemeToggle from "./ThemeToggle";
 
 const NAV_ITEMS = [
   { path: "/", label: "发现" },
@@ -21,9 +22,9 @@ export default function Layout({ children }: LayoutProps) {
       : pathname.startsWith(path);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-paper">
       {/* 顶部导航 */}
-      <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-gray-100">
+      <header className="sticky top-0 z-50 backdrop-blur-md border-b border-gray-100" style={{ backgroundColor: "var(--app-navbar-bg)" }}>
         <div className="max-w-6xl mx-auto px-4 flex items-center h-14">
           {/* Logo */}
           <Link
@@ -54,6 +55,7 @@ export default function Layout({ children }: LayoutProps) {
           </nav>
 
           {/* 右侧配置入口 */}
+          <ThemeToggle />
           <TokenUsageBadge />
           <Link
             to="/agent-config"

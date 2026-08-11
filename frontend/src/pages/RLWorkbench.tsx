@@ -97,7 +97,7 @@ export default function RLWorkbench() {
     <Layout>
       <div className="flex relative" style={{ minHeight: "calc(100vh - 56px)" }}>
         {sidebarOpen && (
-        <aside className="w-48 bg-white border-r border-gray-200 p-3 flex-shrink-0">
+        <aside className="w-48 bg-paper border-r border-gray-200 p-3 flex-shrink-0">
           <h1 className="text-base font-bold text-gray-800 mb-1">研究工作台</h1>
           <p className="text-[10px] text-gray-400 mb-3">🤖 强化学习格子世界</p>
           <FlowStepper steps={STEPS} current={store.currentStage} onStepClick={(s) => {
@@ -109,7 +109,7 @@ export default function RLWorkbench() {
           }} />
         </aside>
         )}
-        <div className="flex-1 overflow-auto bg-gray-50">
+        <div className="flex-1 overflow-auto bg-paper">
           <button
             onClick={() => setSidebarOpen(v => !v)}
             className="sticky top-2 left-2 z-10 w-6 h-6 bg-white border border-gray-200 rounded-full flex items-center justify-center hover:bg-gray-100 hover:border-gray-300 transition-colors shadow-sm"

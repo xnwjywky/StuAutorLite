@@ -94,7 +94,7 @@ export default function SortingWorkbench() {
     <Layout>
       <div className="flex relative" style={{ minHeight: "calc(100vh - 56px)" }}>
         {sidebarOpen && (
-          <aside className="w-56 bg-white border-r border-gray-200 p-4 flex-shrink-0">
+          <aside className="w-56 bg-paper border-r border-gray-200 p-4 flex-shrink-0">
             <h1 className="text-lg font-bold text-gray-800 mb-2">研究工作台</h1>
             <p className="text-xs text-gray-400 mb-4">{isSort ? "排序算法比较研究" : "字符串搜索算法研究"}</p>
             <FlowStepper steps={STEPS} current={store.currentStage} onStepClick={(s) => {
@@ -106,7 +106,7 @@ export default function SortingWorkbench() {
             }} />
           </aside>
         )}
-        <div className="flex-1 overflow-auto bg-gray-50">
+        <div className="flex-1 overflow-auto bg-paper">
           {/* 侧栏折叠按钮 — 放在内容区左上角 */}
           <button
             onClick={() => setSidebarOpen(v => !v)}

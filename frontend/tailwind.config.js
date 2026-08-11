@@ -16,6 +16,8 @@ export default {
           800: "#1e40af",
           900: "#1e3a8a",
         },
+        // 全局页面底色（动态主题）：米白 #f5ecd0 / 纯白 #ffffff，由 index.css 变量控制
+        paper: "var(--app-bg)",
       },
     },
   },
