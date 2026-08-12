@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Layout from "../components/Layout";
 import { createSession } from "../api/service";
+import { useAgentConfigStore } from "../stores/agentConfigStore";
 
 // ═══════════════════════════════════════════════════════════
 // 任务数据
@@ -62,6 +63,13 @@ function getRoute(taskId: string, sid: string | number): string {
 export default function TaskSelect() {
   const navigate = useNavigate();
   const [starting, setStarting] = useState<string | null>(null);
+  const detectLocal = useAgentConfigStore((s) => s.detectLocal);
+
+  // 进入首页时自动探测一次本地推理模型（幂等：每个会话只探测一次），
+  // 结果供 Agent 配置页展示，供无云端 Key 的用户选择本地模型。
+  useEffect(() => {
+    detectLocal();
+  }, [detectLocal]);
 
   const handleStart = async (taskId: string) => {
     // 立即跳转（使用临时 sessionId），不等待后端创建会话

@@ -1,5 +1,8 @@
 """多智能体交互接口 — 设计文档 §9.3 + §11"""
 
+import asyncio
+
+import httpx
 from fastapi import APIRouter, Depends, Header
 from sqlalchemy.orm import Session as DbSession
 from app.models.database import get_db, Hypothesis, Session as SessionModel
@@ -9,6 +12,48 @@ from app.utils.llm_client import LLMClient
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
+# ── 本地推理服务探测（LOCAL_MODEL_INTEGRATION_PLAN）──
+# 均为 OpenAI 兼容端点；本地服务默认无 API Key。
+_LOCAL_ENDPOINTS = [
+    {"name": "Ollama",    "tags_url": "http://127.0.0.1:11434/api/tags", "v1_base": "http://127.0.0.1:11434/v1"},
+    {"name": "LM Studio", "tags_url": "http://127.0.0.1:1234/v1/models",  "v1_base": "http://127.0.0.1:1234/v1"},
+    {"name": "vLLM",      "tags_url": "http://127.0.0.1:8000/v1/models",   "v1_base": "http://127.0.0.1:8000/v1"},
+    {"name": "llama.cpp", "tags_url": "http://127.0.0.1:8080/v1/models",   "v1_base": "http://127.0.0.1:8080/v1"},
+]
+
+_LOCAL_HOST_HINTS = ("127.0.0.1", "localhost", "0.0.0.0")
+# 本地无 key 时的占位值（非空即可，实际请求不带 Bearer 也无妨）
+_LOCAL_NO_KEY = "local-no-key"
+
+
+def _is_local_url(url: str | None) -> bool:
+    """判断地址是否为本地回环地址（本地推理服务无 key 通路仅对这些地址放开）。"""
+    return any(h in (url or "").lower() for h in _LOCAL_HOST_HINTS)
+
+
+def _parse_local_models(data: dict) -> list[str]:
+    """解析本地服务模型列表：Ollama 原生（models[].name）或 OpenAI 兼容（data[].id）。"""
+    if isinstance(data, dict):
+        if isinstance(data.get("models"), list):  # Ollama /api/tags
+            return [str(m["name"]) for m in data["models"] if isinstance(m, dict) and m.get("name")]
+        if isinstance(data.get("data"), list):    # OpenAI /v1/models
+            return [str(m["id"]) for m in data["data"] if isinstance(m, dict) and m.get("id")]
+    return []
+
+
+async def _probe_local_service(client: httpx.AsyncClient, ep: dict) -> dict | None:
+    """探测单个本地服务；不可达 / 超时 / 响应格式不符返回 None。"""
+    try:
+        resp = await client.get(ep["tags_url"])
+        if resp.status_code != 200:
+            return None
+        models = _parse_local_models(resp.json())
+        if not models:
+            return None
+        return {"name": ep["name"], "v1_base": ep["v1_base"], "models": models, "model_count": len(models)}
+    except Exception:
+        return None  # 服务未启动 / 连接拒绝 / 非 JSON
+
 
 def _build_llm(
     x_api_key: str | None = None,
@@ -16,9 +61,17 @@ def _build_llm(
     x_api_model: str | None = None,
     x_api_provider: str | None = None,
 ) -> LLMClient | None:
-    """从前端传来的 Header 中构建 LLM 客户端"""
-    if not x_api_key or not x_api_base or not x_api_model:
+    """从前端传来的 Header 中构建 LLM 客户端
+
+    本地推理服务（Ollama / LM Studio / vLLM / llama.cpp）默认无 API Key，
+    对本地回环地址放开 key 校验；公网地址仍强制要求 key。
+    """
+    if not x_api_base or not x_api_model:
         return None
+    is_local = _is_local_url(x_api_base)
+    if not x_api_key and not is_local:
+        return None
+    api_key = x_api_key or _LOCAL_NO_KEY  # 本地无 key 时用占位，满足下游非空校验
     base = x_api_base
     model = x_api_model
     provider = x_api_provider or "openai"
@@ -38,7 +91,16 @@ def _build_llm(
     elif "/anthropic" in base_lower or provider == "anthropic":
         provider = "anthropic"
 
-    return LLMClient(x_api_key, base, model, provider)
+    return LLMClient(api_key, base, model, provider)
+
+
+@router.get("/local-models")
+async def detect_local_models():
+    """探测本机已安装的本地推理服务及其模型列表（Agent 配置页一键连接）。"""
+    async with httpx.AsyncClient(timeout=2.0) as client:  # 短超时，本机探测
+        results = await asyncio.gather(*(_probe_local_service(client, ep) for ep in _LOCAL_ENDPOINTS))
+    services = [r for r in results if r]
+    return {"services": services, "found": len(services) > 0}
 
 
 @router.get("/")

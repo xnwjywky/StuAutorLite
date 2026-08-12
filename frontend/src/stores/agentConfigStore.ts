@@ -1,6 +1,7 @@
 /** Agent LLM 配置 Store — 多配置共享，sessionStorage 持久化 */
 
 import { create } from "zustand";
+import apiClient from "../api/client";
 
 // ═══════════════════════════════════════════════════════════
 // 类型
@@ -18,7 +19,23 @@ export interface AgentConfig {
   agentNames: string[];
   /** 是否启用：仅启用的配置会被 Agent 使用（可单选一个或全部停用）；旧配置缺省视为启用 */
   enabled?: boolean;
+  /** 配置来源：本地推理服务（Ollama 等，无需 Key）或云端 API */
+  source?: "local" | "cloud";
   createdAt: number;
+}
+
+/** 本地推理服务探测结果（GET /api/agents/local-models 返回结构） */
+export interface LocalModelService {
+  name: string;
+  v1_base: string;
+  models: string[];
+  model_count: number;
+}
+
+/** 判断地址是否为本地回环地址（本地推理服务无 key 通路仅对这些地址放开） */
+export function isLocalBaseUrl(url: string): boolean {
+  const u = (url || "").toLowerCase();
+  return u.includes("127.0.0.1") || u.includes("localhost") || u.includes("0.0.0.0");
 }
 
 export const AGENT_NAMES = [
@@ -85,6 +102,10 @@ export function maskApiKey(key: string): string {
 
 interface ConfigState {
   configs: AgentConfig[];
+  /** 本机检测到的本地推理服务（无本地服务时为空数组） */
+  localServices: LocalModelService[];
+  /** 是否已执行过本地模型探测（幂等，避免每次进首页重复请求） */
+  localDetected: boolean;
   load: () => void;
   add: (c: Omit<AgentConfig, "id" | "createdAt">) => void;
   update: (id: string, partial: Partial<AgentConfig>) => void;
@@ -94,6 +115,8 @@ interface ConfigState {
   /** 停用全部配置（都不使用，Agent 回退到模板） */
   deactivateAll: () => void;
   getForAgent: (name: string) => AgentConfig | null;
+  /** 探测本机本地推理服务（幂等：每个会话仅执行一次） */
+  detectLocal: () => Promise<void>;
 }
 
 function uuid(): string {
@@ -106,6 +129,8 @@ function uuid(): string {
 
 export const useAgentConfigStore = create<ConfigState>((set, get) => ({
   configs: loadConfigs(),
+  localServices: [],
+  localDetected: false,
 
   load: () => set({ configs: loadConfigs() }),
 
@@ -150,4 +175,15 @@ export const useAgentConfigStore = create<ConfigState>((set, get) => ({
   },
 
   getForAgent: (name) => getConfigForAgent(name),
+
+  detectLocal: async () => {
+    if (get().localDetected) return; // 幂等：每个会话只探测一次
+    set({ localDetected: true });
+    try {
+      const resp: any = await apiClient.get("/api/agents/local-models");
+      set({ localServices: Array.isArray(resp?.services) ? resp.services : [] });
+    } catch {
+      set({ localServices: [] }); // 后端不可用 → 视为无本地模型
+    }
+  },
 }));

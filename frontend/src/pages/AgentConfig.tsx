@@ -12,6 +12,7 @@ import {
   useAgentConfigStore,
   maskApiKey,
   AGENT_NAMES,
+  isLocalBaseUrl,
 } from "../stores/agentConfigStore";
 
 const AGENT_LABELS: Record<string, string> = {
@@ -30,7 +31,7 @@ const PRESETS: { label: string; baseUrl: string; model: string }[] = [
 ];
 
 export default function AgentConfigPage() {
-  const { configs, add, remove, load, activate, deactivateAll } = useAgentConfigStore();
+  const { configs, add, remove, load, activate, deactivateAll, localServices } = useAgentConfigStore();
   const [adding, setAdding] = useState(false);
 
   // ── 新配置表单 ──
@@ -43,8 +44,9 @@ export default function AgentConfigPage() {
   });
 
   const handleAdd = () => {
-    if (!form.label.trim() || !form.apiKey.trim()) return;
-    add({ ...form, provider: "openai" as const });
+    const isLocal = isLocalBaseUrl(form.baseUrl);
+    if (!form.label.trim() || (!form.apiKey.trim() && !isLocal)) return;
+    add({ ...form, apiKey: form.apiKey || "local", provider: "openai" as const, source: isLocal ? "local" as const : "cloud" as const });
     setForm({ label: "test_key", apiKey: "", baseUrl: PRESETS[0].baseUrl, model: PRESETS[0].model, agentNames: [] });
     setAdding(false);
   };
@@ -68,6 +70,37 @@ export default function AgentConfigPage() {
           </div>
           <button className="btn-primary" onClick={() => setAdding(true)}>+ 添加配置</button>
         </div>
+
+        {/* ── 本地模型检测结果（仅检测到本地服务时显示）── */}
+        {localServices && localServices.length > 0 && (
+          <div className="card mb-6 border-green-100 bg-green-50/20">
+            <h3 className="font-semibold text-sm text-gray-700 mb-3">🟢 检测到本地模型服务（点击模型填入配置）</h3>
+            {localServices.map((svc) => (
+              <div key={svc.name} className="mb-3 last:mb-0">
+                <p className="text-xs text-gray-500 mb-1">{svc.name} · {svc.model_count} 个模型 · {svc.v1_base}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {svc.models.map((m) => (
+                    <button key={m} type="button"
+                      onClick={() => {
+                        setForm({
+                          label: `${svc.name}-${m}`,
+                          apiKey: "",
+                          baseUrl: svc.v1_base,
+                          model: m,
+                          agentNames: [],
+                        });
+                        setAdding(true);
+                      }}
+                      className="px-2 py-0.5 rounded-full text-[11px] border border-green-200 text-green-700 hover:bg-green-100">
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <p className="text-[10px] text-gray-400 mt-3">本地服务默认无 API Key，保存后即自动填入占位 Key 并标记为「本地」配置</p>
+          </div>
+        )}
 
         {/* ── 添加配置表单 ── */}
         {adding && (
@@ -129,7 +162,7 @@ export default function AgentConfigPage() {
             </div>
             <div className="flex justify-end gap-2 mt-4">
               <button className="btn-secondary" onClick={() => setAdding(false)}>取消</button>
-              <button className="btn-primary" onClick={handleAdd} disabled={!form.label.trim() || !form.apiKey.trim()}>
+              <button className="btn-primary" onClick={handleAdd} disabled={!form.label.trim() || (!form.apiKey.trim() && !isLocalBaseUrl(form.baseUrl))}>
                 保存配置
               </button>
             </div>
@@ -171,7 +204,7 @@ export default function AgentConfigPage() {
                       </span>
                     </div>
                     <div className="text-xs text-gray-500 space-y-0.5 font-mono">
-                      <p>🔑 {maskApiKey(cfg.apiKey)}</p>
+                      <p>🔑 {cfg.source === "local" ? "本地（无需 Key）" : maskApiKey(cfg.apiKey)}</p>
                       <p>🌐 {cfg.baseUrl}</p>
                       <p>🤖 {cfg.model}</p>
                     </div>
