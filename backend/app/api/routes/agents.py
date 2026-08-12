@@ -1,9 +1,11 @@
 """多智能体交互接口 — 设计文档 §9.3 + §11"""
 
 import asyncio
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, Header
+from pydantic import BaseModel
 from sqlalchemy.orm import Session as DbSession
 from app.models.database import get_db, Hypothesis, Session as SessionModel
 from app.models.schemas import AgentInvokeRequest, HypothesisCreate
@@ -101,6 +103,70 @@ async def detect_local_models():
         results = await asyncio.gather(*(_probe_local_service(client, ep) for ep in _LOCAL_ENDPOINTS))
     services = [r for r in results if r]
     return {"services": services, "found": len(services) > 0}
+
+
+class LocalProbeRequest(BaseModel):
+    """用户自定义地址探测请求体。"""
+    url: str  # 用户填写的地址，如 http://127.0.0.1:11435 或 http://192.168.1.20:8080
+
+
+def _probe_candidates(raw: str) -> list[str]:
+    """根据用户地址推导候选探测 URL（覆盖 Ollama 原生 + OpenAI 兼容两种格式）。"""
+    if raw.endswith("/api/tags") or raw.endswith("/v1/models"):
+        return [raw]
+    if raw.endswith("/v1"):
+        return [raw + "/models", raw[:-3] + "/api/tags"]
+    # 裸地址：两种路径都试
+    return [raw + "/api/tags", raw + "/v1/models"]
+
+
+def _probe_v1_base(tags_url: str) -> str:
+    """从命中的探测 URL 反推 v1_base（OpenAI 兼容取 /v1，Ollama 原生也统一成 /v1）。"""
+    if tags_url.endswith("/v1/models"):
+        return tags_url[:-len("/models")]
+    if tags_url.endswith("/api/tags"):
+        return tags_url[:-len("/api/tags")] + "/v1"
+    return tags_url
+
+
+@router.post("/local-models/probe")
+async def probe_custom_local(req: LocalProbeRequest):
+    """对用户指定的单个地址探测模型列表。
+
+    - 地址校验：仅允许 http/https 且 host 非空（SSRF 最小防护）
+    - 单地址多路径尝试：/api/tags（Ollama）与 /v1/models（OpenAI 兼容）命中即返回
+    """
+    raw = (req.url or "").strip().rstrip("/")
+    if not raw:
+        return {"found": False, "services": [], "error": "地址为空"}
+    parsed = urlparse(raw)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return {"found": False, "services": [], "error": "仅支持 http/https 地址"}
+
+    candidates = _probe_candidates(raw)
+    async with httpx.AsyncClient(timeout=3.0) as client:
+        for tags_url in candidates:
+            try:
+                resp = await client.get(tags_url)
+                if resp.status_code != 200:
+                    continue
+                models = _parse_local_models(resp.json())
+                if not models:
+                    continue
+                return {
+                    "found": True,
+                    "services": [{
+                        "name": "自定义服务",
+                        "v1_base": _probe_v1_base(tags_url),
+                        "models": models,
+                        "model_count": len(models),
+                        "source_url": tags_url,
+                    }],
+                }
+            except Exception:
+                continue  # 该路径不可达 / 超时 / 非 JSON，尝试下一条
+
+    return {"found": False, "services": [], "error": f"未在 {raw} 探测到可用模型（已尝试 {len(candidates)} 种路径）"}
 
 
 @router.get("/")

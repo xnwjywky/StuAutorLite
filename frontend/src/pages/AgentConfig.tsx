@@ -13,6 +13,8 @@ import {
   maskApiKey,
   AGENT_NAMES,
   isLocalBaseUrl,
+  loadCustomLocalUrl,
+  saveCustomLocalUrl,
 } from "../stores/agentConfigStore";
 
 const AGENT_LABELS: Record<string, string> = {
@@ -31,8 +33,11 @@ const PRESETS: { label: string; baseUrl: string; model: string }[] = [
 ];
 
 export default function AgentConfigPage() {
-  const { configs, add, remove, load, activate, deactivateAll, localServices } = useAgentConfigStore();
+  const { configs, add, remove, load, activate, deactivateAll, localServices, customServices, probingCustom, probeCustom, clearCustom } = useAgentConfigStore();
   const [adding, setAdding] = useState(false);
+  const [customUrl, setCustomUrl] = useState<string>(loadCustomLocalUrl);
+  const [probeError, setProbeError] = useState<string | null>(null);
+  const [probeMsg, setProbeMsg] = useState<string | null>(null);
 
   // ── 新配置表单 ──
   const [form, setForm] = useState({
@@ -42,6 +47,20 @@ export default function AgentConfigPage() {
     model: PRESETS[0].model,
     agentNames: [] as string[],
   });
+
+  const handleProbe = async () => {
+    const url = customUrl.trim();
+    if (!url || probingCustom) return;
+    saveCustomLocalUrl(url);
+    setProbeError(null);
+    setProbeMsg(null);
+    const r = await probeCustom(url);
+    if (r.found) {
+      setProbeMsg("✅ 已探测到本地模型，点击下方模型填入配置");
+    } else {
+      setProbeError(r.error || "未探测到可用模型");
+    }
+  };
 
   const handleAdd = () => {
     const isLocal = isLocalBaseUrl(form.baseUrl);
@@ -99,6 +118,66 @@ export default function AgentConfigPage() {
               </div>
             ))}
             <p className="text-[10px] text-gray-400 mt-3">本地服务默认无 API Key，保存后即自动填入占位 Key 并标记为「本地」配置</p>
+          </div>
+        )}
+
+        {/* ── 自定义本地模型地址 ── */}
+        <div className="card mb-6 border-amber-100 bg-amber-50/20">
+          <h3 className="font-semibold text-sm text-gray-700 mb-2">📍 自定义本地模型地址</h3>
+          <p className="text-[11px] text-gray-500 mb-3">
+            默认探测仅覆盖 Ollama(11434) / LM Studio(1234) / vLLM(8000) / llama.cpp(8080)。
+            若你的服务在其他端口或另一台机器，在此填写地址后点「检测」（支持 Ollama /api/tags 与 OpenAI /v1/models 两种协议）。
+          </p>
+          <div className="flex gap-2">
+            <input
+              className="flex-1 px-3 py-2 border rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-amber-300"
+              placeholder="例如 http://127.0.0.1:11435 或 http://192.168.1.20:8080"
+              value={customUrl}
+              onChange={(e) => setCustomUrl(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleProbe(); }}
+            />
+            <button
+              className="btn-secondary text-xs"
+              onClick={handleProbe}
+              disabled={!customUrl.trim() || probingCustom}
+            >
+              {probingCustom ? "检测中…" : "检测"}
+            </button>
+          </div>
+          {probeError && <p className="text-xs text-red-500 mt-2">⚠️ {probeError}</p>}
+          {probeMsg && !probeError && <p className="text-xs text-green-600 mt-2">{probeMsg}</p>}
+        </div>
+
+        {/* ── 自定义地址探测结果（仅探测到模型时显示）── */}
+        {customServices.length > 0 && (
+          <div className="card mb-6 border-amber-200 bg-amber-50/30">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-sm text-gray-700">📍 自定义地址探测结果（点击模型填入配置）</h3>
+              <button className="text-xs text-gray-400 hover:text-gray-600" onClick={clearCustom}>清除</button>
+            </div>
+            {customServices.map((svc) => (
+              <div key={svc.v1_base} className="mb-3 last:mb-0">
+                <p className="text-xs text-gray-500 mb-1">{svc.name} · {svc.model_count} 个模型 · {svc.v1_base}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {svc.models.map((m) => (
+                    <button key={m} type="button"
+                      onClick={() => {
+                        setForm({
+                          label: `${svc.name}-${m}`,
+                          apiKey: "",
+                          baseUrl: svc.v1_base,
+                          model: m,
+                          agentNames: [],
+                        });
+                        setAdding(true);
+                      }}
+                      className="px-2 py-0.5 rounded-full text-[11px] border border-amber-300 text-amber-700 hover:bg-amber-100">
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         )}
 

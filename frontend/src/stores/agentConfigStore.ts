@@ -53,6 +53,17 @@ export const AGENT_NAMES = [
 // ═══════════════════════════════════════════════════════════
 
 const STORAGE_KEY = "stuautor_agent_configs";
+const CUSTOM_URL_KEY = "stuautor_custom_local_url";
+
+/** 读取上次保存的自定义本地模型地址（sessionStorage） */
+export function loadCustomLocalUrl(): string {
+  try { return sessionStorage.getItem(CUSTOM_URL_KEY) || ""; } catch { return ""; }
+}
+
+/** 保存自定义本地模型地址（sessionStorage） */
+export function saveCustomLocalUrl(url: string) {
+  try { sessionStorage.setItem(CUSTOM_URL_KEY, url); } catch {}
+}
 
 function loadConfigs(): AgentConfig[] {
   try {
@@ -106,6 +117,10 @@ interface ConfigState {
   localServices: LocalModelService[];
   /** 是否已执行过本地模型探测（幂等，避免每次进首页重复请求） */
   localDetected: boolean;
+  /** 用户自定义地址探测结果（与 localServices 分开，便于分别展示） */
+  customServices: LocalModelService[];
+  /** 自定义地址探测中 */
+  probingCustom: boolean;
   load: () => void;
   add: (c: Omit<AgentConfig, "id" | "createdAt">) => void;
   update: (id: string, partial: Partial<AgentConfig>) => void;
@@ -117,6 +132,10 @@ interface ConfigState {
   getForAgent: (name: string) => AgentConfig | null;
   /** 探测本机本地推理服务（幂等：每个会话仅执行一次） */
   detectLocal: () => Promise<void>;
+  /** 探测用户自定义地址（POST /api/agents/local-models/probe） */
+  probeCustom: (url: string) => Promise<{ found: boolean; error?: string }>;
+  /** 清空自定义探测结果 */
+  clearCustom: () => void;
 }
 
 function uuid(): string {
@@ -131,6 +150,8 @@ export const useAgentConfigStore = create<ConfigState>((set, get) => ({
   configs: loadConfigs(),
   localServices: [],
   localDetected: false,
+  customServices: [],
+  probingCustom: false,
 
   load: () => set({ configs: loadConfigs() }),
 
@@ -186,4 +207,21 @@ export const useAgentConfigStore = create<ConfigState>((set, get) => ({
       set({ localServices: [] }); // 后端不可用 → 视为无本地模型
     }
   },
+
+  probeCustom: async (url) => {
+    set({ probingCustom: true });
+    try {
+      const resp: any = await apiClient.post("/api/agents/local-models/probe", { url });
+      set({
+        customServices: Array.isArray(resp?.services) ? resp.services : [],
+        probingCustom: false,
+      });
+      return { found: !!resp?.found, error: resp?.error };
+    } catch (e: any) {
+      set({ customServices: [], probingCustom: false });
+      return { found: false, error: e?.message || "探测失败" };
+    }
+  },
+
+  clearCustom: () => set({ customServices: [] }),
 }));

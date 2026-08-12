@@ -1,6 +1,20 @@
 /** 测试 agentConfigStore — Agent 配置管理与密钥安全 */
-import { describe, it, expect, beforeEach } from "vitest";
-import { useAgentConfigStore, getConfigForAgent, maskApiKey, AGENT_NAMES } from "../agentConfigStore";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import {
+  useAgentConfigStore,
+  getConfigForAgent,
+  maskApiKey,
+  AGENT_NAMES,
+  loadCustomLocalUrl,
+  saveCustomLocalUrl,
+} from "../agentConfigStore";
+import apiClient from "../../api/client";
+
+vi.mock("../../api/client", () => ({
+  default: { get: vi.fn(), post: vi.fn() },
+}));
+
+const mockPost = vi.mocked(apiClient.post);
 
 describe("agentConfigStore", () => {
   beforeEach(() => {
@@ -181,5 +195,73 @@ describe("AGENT_NAMES", () => {
     expect(AGENT_NAMES).toHaveLength(6);
     expect(AGENT_NAMES).toContain("research_mentor");
     expect(AGENT_NAMES).toContain("reviewer");
+  });
+});
+
+describe("probeCustom 自定义地址探测", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    mockPost.mockReset();
+    useAgentConfigStore.getState().load();
+    useAgentConfigStore.setState({ customServices: [], probingCustom: false });
+  });
+
+  it("探测成功时填充 customServices 并返回 found=true", async () => {
+    mockPost.mockResolvedValue({
+      found: true,
+      services: [{
+        name: "自定义服务",
+        v1_base: "http://127.0.0.1:11435/v1",
+        models: ["qwen2.5:7b"],
+        model_count: 1,
+      }],
+    });
+    const r = await useAgentConfigStore.getState().probeCustom("http://127.0.0.1:11435");
+    expect(r.found).toBe(true);
+    expect(mockPost).toHaveBeenCalledWith("/api/agents/local-models/probe", { url: "http://127.0.0.1:11435" });
+    expect(useAgentConfigStore.getState().customServices).toHaveLength(1);
+    expect(useAgentConfigStore.getState().customServices[0].v1_base).toBe("http://127.0.0.1:11435/v1");
+    expect(useAgentConfigStore.getState().probingCustom).toBe(false);
+  });
+
+  it("探测失败（后端返回 error）时清空结果并返回错误", async () => {
+    mockPost.mockResolvedValue({ found: false, services: [], error: "未探测到可用模型" });
+    const r = await useAgentConfigStore.getState().probeCustom("http://127.0.0.1:9999");
+    expect(r.found).toBe(false);
+    expect(r.error).toBe("未探测到可用模型");
+    expect(useAgentConfigStore.getState().customServices).toEqual([]);
+  });
+
+  it("探测异常（请求失败）时清空结果并返回通用错误", async () => {
+    mockPost.mockRejectedValue(new Error("Network Error"));
+    const r = await useAgentConfigStore.getState().probeCustom("http://127.0.0.1:11435");
+    expect(r.found).toBe(false);
+    expect(r.error).toContain("Network Error");
+    expect(useAgentConfigStore.getState().customServices).toEqual([]);
+    expect(useAgentConfigStore.getState().probingCustom).toBe(false);
+  });
+
+  it("clearCustom 清空自定义结果", () => {
+    useAgentConfigStore.setState({
+      customServices: [{ name: "自定义服务", v1_base: "http://x/v1", models: ["m"], model_count: 1 }],
+    });
+    useAgentConfigStore.getState().clearCustom();
+    expect(useAgentConfigStore.getState().customServices).toEqual([]);
+  });
+});
+
+describe("自定义本地模型地址持久化", () => {
+  beforeEach(() => sessionStorage.clear());
+
+  it("save 后 load 能取回", () => {
+    expect(loadCustomLocalUrl()).toBe("");
+    saveCustomLocalUrl("http://127.0.0.1:11435");
+    expect(loadCustomLocalUrl()).toBe("http://127.0.0.1:11435");
+  });
+
+  it("sessionStorage 清空后 load 返回空串", () => {
+    saveCustomLocalUrl("http://127.0.0.1:11435");
+    sessionStorage.clear();
+    expect(loadCustomLocalUrl()).toBe("");
   });
 });

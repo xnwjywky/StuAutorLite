@@ -142,3 +142,130 @@ class TestLocalModelsAPI:
         assert resp.status_code == 200
         data = resp.json()
         assert "services" in data and "found" in data
+
+    async def test_probe_endpoint_empty_url(self, client):
+        resp = await client.post("/api/agents/local-models/probe", json={"url": ""})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["found"] is False
+        assert data["error"] == "地址为空"
+
+
+class TestProbeCandidates:
+    def test_bare_url_tries_both_paths(self):
+        from app.api.routes.agents import _probe_candidates
+
+        assert _probe_candidates("http://127.0.0.1:11435") == [
+            "http://127.0.0.1:11435/api/tags",
+            "http://127.0.0.1:11435/v1/models",
+        ]
+
+    def test_v1_url_tries_openai_first_then_ollama(self):
+        from app.api.routes.agents import _probe_candidates
+
+        assert _probe_candidates("http://127.0.0.1:11435/v1") == [
+            "http://127.0.0.1:11435/v1/models",
+            "http://127.0.0.1:11435/api/tags",
+        ]
+
+    def test_full_endpoint_used_as_is(self):
+        from app.api.routes.agents import _probe_candidates
+
+        assert _probe_candidates("http://x/api/tags") == ["http://x/api/tags"]
+        assert _probe_candidates("http://x/v1/models") == ["http://x/v1/models"]
+
+
+class TestProbeV1Base:
+    def test_openai_path(self):
+        from app.api.routes.agents import _probe_v1_base
+
+        assert _probe_v1_base("http://127.0.0.1:11435/v1/models") == "http://127.0.0.1:11435/v1"
+
+    def test_ollama_path(self):
+        from app.api.routes.agents import _probe_v1_base
+
+        assert _probe_v1_base("http://127.0.0.1:11435/api/tags") == "http://127.0.0.1:11435/v1"
+
+
+class _FakeResp:
+    def __init__(self, status_code: int, data: dict):
+        self.status_code = status_code
+        self._data = data
+
+    def json(self) -> dict:
+        return self._data
+
+
+class _FakeAsyncClient:
+    """httpx.AsyncClient 测试替身：按 URL 返回预设响应，未匹配则抛连接错误。"""
+
+    def __init__(self, responses: dict[str, tuple[int, dict]]):
+        self.responses = responses
+        self.requests: list[str] = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def get(self, url: str):
+        self.requests.append(url)
+        if url not in self.responses:
+            import httpx
+            raise httpx.ConnectError(f"connection refused: {url}")
+        status, data = self.responses[url]
+        return _FakeResp(status, data)
+
+
+class TestProbeCustomLocal:
+    async def test_empty_url(self):
+        from app.api.routes.agents import LocalProbeRequest, probe_custom_local
+
+        resp = await probe_custom_local(LocalProbeRequest(url=""))
+        assert resp["found"] is False
+        assert resp["error"] == "地址为空"
+
+    async def test_bad_scheme(self):
+        from app.api.routes.agents import LocalProbeRequest, probe_custom_local
+
+        resp = await probe_custom_local(LocalProbeRequest(url="ftp://127.0.0.1:11434"))
+        assert resp["found"] is False
+        assert "http/https" in resp["error"]
+
+    async def test_unreachable(self):
+        from app.api.routes.agents import LocalProbeRequest, probe_custom_local
+
+        resp = await probe_custom_local(LocalProbeRequest(url="http://127.0.0.1:1"))
+        assert resp["found"] is False
+        assert "未" in resp["error"]
+
+    async def test_ollama_hit(self, monkeypatch):
+        from app.api.routes import agents as routes
+        from app.api.routes.agents import LocalProbeRequest, probe_custom_local
+
+        fake = _FakeAsyncClient({
+            "http://127.0.0.1:11435/api/tags": (200, {"models": [{"name": "qwen2.5:7b"}, {"name": "llama3:8b"}]}),
+        })
+        monkeypatch.setattr(routes.httpx, "AsyncClient", lambda **kw: fake)
+        resp = await probe_custom_local(LocalProbeRequest(url="http://127.0.0.1:11435"))
+        assert resp["found"] is True
+        svc = resp["services"][0]
+        assert svc["v1_base"] == "http://127.0.0.1:11435/v1"
+        assert svc["models"] == ["qwen2.5:7b", "llama3:8b"]
+        assert svc["source_url"] == "http://127.0.0.1:11435/api/tags"
+
+    async def test_openai_compatible_hit(self, monkeypatch):
+        from app.api.routes import agents as routes
+        from app.api.routes.agents import LocalProbeRequest, probe_custom_local
+
+        # 裸地址：先试 /api/tags（404）再试 /v1/models（200）
+        fake = _FakeAsyncClient({
+            "http://192.168.1.20:8080/v1/models": (200, {"data": [{"id": "deepseek-r1:14b"}]}),
+        })
+        monkeypatch.setattr(routes.httpx, "AsyncClient", lambda **kw: fake)
+        resp = await probe_custom_local(LocalProbeRequest(url="http://192.168.1.20:8080"))
+        assert resp["found"] is True
+        assert resp["services"][0]["v1_base"] == "http://192.168.1.20:8080/v1"
+        assert fake.requests[0] == "http://192.168.1.20:8080/api/tags"  # 先试 Ollama 路径
+        assert fake.requests[1] == "http://192.168.1.20:8080/v1/models"
