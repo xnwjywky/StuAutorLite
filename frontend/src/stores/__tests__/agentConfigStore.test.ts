@@ -100,6 +100,64 @@ describe("getConfigForAgent", () => {
     const r = getConfigForAgent("research_mentor");
     expect(r?.label).toBe("专属");
   });
+
+  it("停用的配置不会被选中（全部停用返回 null）", () => {
+    const cfg = { id: "1", label: "停用", apiKey: "sk-a", baseUrl: "http://x", model: "m", provider: "openai", agentNames: [], enabled: false, createdAt: 0 };
+    sessionStorage.setItem("stuautor_agent_configs", JSON.stringify([cfg]));
+    expect(getConfigForAgent("research_mentor")).toBeNull();
+  });
+
+  it("启用项被选中时忽略已停用配置", () => {
+    const disabled = { id: "1", label: "停用", apiKey: "sk-a", baseUrl: "http://x", model: "m", provider: "openai", agentNames: [], enabled: false, createdAt: 0 };
+    const active = { id: "2", label: "启用", apiKey: "sk-b", baseUrl: "http://y", model: "m2", provider: "openai", agentNames: [], enabled: true, createdAt: 0 };
+    sessionStorage.setItem("stuautor_agent_configs", JSON.stringify([disabled, active]));
+    const r = getConfigForAgent("research_mentor");
+    expect(r?.label).toBe("启用");
+  });
+
+  it("旧配置缺少 enabled 视为启用（向后兼容）", () => {
+    const cfg = { id: "1", label: "旧配置", apiKey: "sk-a", baseUrl: "http://x", model: "m", provider: "openai", agentNames: [], createdAt: 0 };
+    sessionStorage.setItem("stuautor_agent_configs", JSON.stringify([cfg]));
+    expect(getConfigForAgent("research_mentor")?.label).toBe("旧配置");
+  });
+});
+
+describe("enabled 单选与停用", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    useAgentConfigStore.getState().load();
+  });
+
+  function addCfg(label: string) {
+    useAgentConfigStore.getState().add({
+      label, apiKey: "sk-" + label, baseUrl: "http://x", model: "m", provider: "openai" as const, agentNames: [],
+    });
+    const c = useAgentConfigStore.getState().configs.find((x) => x.label === label)!;
+    return c.id;
+  }
+
+  it("add 默认 enabled=true", () => {
+    addCfg("a");
+    expect(useAgentConfigStore.getState().configs[0].enabled).toBe(true);
+  });
+
+  it("activate 单选：启用一个并停用其他", () => {
+    const idA = addCfg("a");
+    const idB = addCfg("b");
+    useAgentConfigStore.getState().activate(idB);
+    const cs = useAgentConfigStore.getState().configs;
+    expect(cs.find((c) => c.id === idB)?.enabled).toBe(true);
+    expect(cs.find((c) => c.id === idA)?.enabled).toBe(false);
+  });
+
+  it("deactivateAll 停用全部（都不使用）", () => {
+    addCfg("a");
+    addCfg("b");
+    useAgentConfigStore.getState().deactivateAll();
+    expect(useAgentConfigStore.getState().configs.every((c) => c.enabled === false)).toBe(true);
+    // 持久化后 getConfigForAgent 返回 null
+    expect(getConfigForAgent("research_mentor")).toBeNull();
+  });
 });
 
 describe("maskApiKey", () => {

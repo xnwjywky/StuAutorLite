@@ -2,8 +2,9 @@
  * Agent LLM 配置页
  *
  * - 支持多个配置：共享（所有 Agent 共用）或单独分配给特定 Agent
- * - API Key 默认屏蔽中间字符，仅显示前后各 4 位
- * - 配置持久化到 localStorage
+ * - API Key 始终掩码显示（不提供明文查看按钮）
+ * - 多配置时可选启用特定一个或全部停用（停用后 Agent 回退到内置模板）
+ * - 配置持久化到 sessionStorage
  */
 import { useState } from "react";
 import Layout from "../components/Layout";
@@ -22,32 +23,29 @@ const AGENT_LABELS: Record<string, string> = {
   algorithm_tutor: "算法讲解员",
 };
 
+/** 常用服务商预设：一键填充 Base URL 与模型 */
+const PRESETS: { label: string; baseUrl: string; model: string }[] = [
+  { label: "DeepSeek", baseUrl: "https://api.deepseek.com/anthropic", model: "deepseek-v4-flash" },
+  { label: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-4o" },
+];
+
 export default function AgentConfigPage() {
-  const { configs, add, remove, load } = useAgentConfigStore();
+  const { configs, add, remove, load, activate, deactivateAll } = useAgentConfigStore();
   const [adding, setAdding] = useState(false);
-  const [unmasked, setUnmasked] = useState<Set<string>>(new Set());
 
   // ── 新配置表单 ──
   const [form, setForm] = useState({
     label: "test_key",
     apiKey: "",
-    baseUrl: "https://api.deepseek.com/anthropic",
-    model: "deepseek-v4-flash",
+    baseUrl: PRESETS[0].baseUrl,
+    model: PRESETS[0].model,
     agentNames: [] as string[],
   });
-
-  const toggleUnmask = (id: string) => {
-    setUnmasked((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  };
 
   const handleAdd = () => {
     if (!form.label.trim() || !form.apiKey.trim()) return;
     add({ ...form, provider: "openai" as const });
-    setForm({ label: "test_key", apiKey: "", baseUrl: "https://api.deepseek.com/anthropic", model: "deepseek-v4-flash", agentNames: [] });
+    setForm({ label: "test_key", apiKey: "", baseUrl: PRESETS[0].baseUrl, model: PRESETS[0].model, agentNames: [] });
     setAdding(false);
   };
 
@@ -57,6 +55,8 @@ export default function AgentConfigPage() {
       agentNames: f.agentNames.includes(name) ? f.agentNames.filter((n) => n !== name) : [...f.agentNames, name],
     }));
   };
+
+  const activeCount = configs.filter((c) => c.enabled !== false).length;
 
   return (
     <Layout>
@@ -100,7 +100,17 @@ export default function AgentConfigPage() {
                     placeholder="例如 deepseek-v4-flash 或 gpt-4o" />
                 </div>
               </div>
-              <p className="text-[10px] text-gray-400">协议由后端根据 Base URL 自动检测（deepseek/api.openai.com → OpenAI 协议，/anthropic → Anthropic 协议）</p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] text-gray-400 mr-1">快捷填充：</span>
+                {PRESETS.map((p) => (
+                  <button key={p.label} type="button"
+                    onClick={() => setForm((f) => ({ ...f, baseUrl: p.baseUrl, model: p.model }))}
+                    className="px-2 py-0.5 rounded-full text-[11px] border border-gray-200 text-gray-500 hover:bg-gray-100">
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-gray-400">协议由后端根据 Base URL 自动检测（deepseek/siliconflow → OpenAI 协议，/anthropic → Anthropic 协议）</p>
               <div>
                 <label className="text-xs font-medium text-gray-500 mb-1 block">
                   分配给 Agent（不选 = 所有 Agent 共用）
@@ -137,43 +147,58 @@ export default function AgentConfigPage() {
         )}
 
         <div className="space-y-3">
-          {configs.map((cfg) => (
-            <div key={cfg.id} className="card">
-              <div className="flex items-start justify-between">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-3 mb-2">
-                    <h3 className="font-semibold text-gray-800 text-sm">{cfg.label}</h3>
-                    <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
-                      {cfg.agentNames.length > 0 ? cfg.agentNames.map((n) => AGENT_LABELS[n] || n).join("、") : "全部 Agent 共用"}
-                    </span>
-                  </div>
-                  <div className="text-xs text-gray-500 space-y-0.5 font-mono">
-                    <p>🔑 {unmasked.has(cfg.id) ? cfg.apiKey : maskApiKey(cfg.apiKey)}
-                      <button className="ml-2 text-gray-400 hover:text-gray-600 underline" onClick={() => toggleUnmask(cfg.id)}>
-                        {unmasked.has(cfg.id) ? "隐藏" : "显示"}
+          {configs.map((cfg) => {
+            const isActive = cfg.enabled !== false;
+            return (
+              <div key={cfg.id} className="card">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-3 mb-2">
+                      <button
+                        onClick={() => (isActive ? deactivateAll() : activate(cfg.id))}
+                        title={isActive ? "点击停用此配置" : "启用此配置（同时停用其他配置）"}
+                        aria-pressed={isActive}
+                        className={`flex items-center gap-1.5 text-xs shrink-0 px-2 py-0.5 rounded-full transition-colors ${
+                          isActive ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-400 hover:bg-gray-200"
+                        }`}
+                      >
+                        <span className={`inline-block w-2 h-2 rounded-full ${isActive ? "bg-green-500" : "bg-gray-300"}`} />
+                        {isActive ? "使用中" : "未启用"}
                       </button>
-                    </p>
-                    <p>🌐 {cfg.baseUrl}</p>
-                    <p>🤖 {cfg.model}</p>
+                      <h3 className="font-semibold text-gray-800 text-sm">{cfg.label}</h3>
+                      <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                        {cfg.agentNames.length > 0 ? cfg.agentNames.map((n) => AGENT_LABELS[n] || n).join("、") : "全部 Agent 共用"}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-500 space-y-0.5 font-mono">
+                      <p>🔑 {maskApiKey(cfg.apiKey)}</p>
+                      <p>🌐 {cfg.baseUrl}</p>
+                      <p>🤖 {cfg.model}</p>
+                    </div>
                   </div>
+                  <button className="text-red-400 hover:text-red-600 text-xs ml-4 shrink-0"
+                    onClick={() => { remove(cfg.id); load(); }}>删除</button>
                 </div>
-                <button className="text-red-400 hover:text-red-600 text-xs ml-4 shrink-0"
-                  onClick={() => { remove(cfg.id); load(); }}>删除</button>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
+        {configs.length > 0 && (
+          <p className="mt-3 text-xs text-gray-400">
+            {activeCount > 0 ? `当前启用 ${activeCount} 个配置（Agent 调用按 专属 > 共享 > 首个启用 顺序取用）` : "当前未启用任何配置，Agent 将回退到内置模板，不调用 LLM"}
+          </p>
+        )}
 
         {/* ── 说明 ── */}
         <div className="card mt-6 border-blue-100 bg-blue-50/30">
           <h3 className="font-semibold text-sm text-gray-700 mb-2">说明</h3>
           <ul className="text-xs text-gray-500 space-y-1">
-            <li>• API Key 保存在浏览器会话存储（sessionStorage）中，关闭标签页即清除</li>
-            <li>• 每次 Agent 调用时，前端将配置（含 API Key）通过请求头发送给后端，用于调用你配置的模型服务商</li>
+            <li>• API Key 保存在浏览器会话存储（sessionStorage）中，关闭标签页即清除；列表仅显示掩码，不提供明文查看</li>
+            <li>• 每次 Agent 调用时，前端将启用的配置（含 API Key）通过请求头发送给后端，用于调用你配置的模型服务商</li>
+            <li>• 多配置时点绿色「使用中」按钮切换启用项，或再次点击停用全部（都不使用 → Agent 回退模板）</li>
             <li>• 请勿在公共电脑保存密钥；不要将 Key 分享给他人</li>
-            <li>• 共享配置：不指定 Agent 则所有 Agent 共用同一个 Key</li>
-            <li>• 专属配置：指定 Agent 后，只有该 Agent 使用此 Key</li>
-            <li>• 查找优先级：专属配置 {'>'} 共享配置 {'>'} 第一个有效配置</li>
+            <li>• 共享配置：不指定 Agent 则所有 Agent 共用同一个 Key；专属配置：指定 Agent 后，只有该 Agent 使用此 Key</li>
+            <li>• 快捷填充支持 DeepSeek、OpenAI 两种常用服务商</li>
           </ul>
         </div>
       </div>

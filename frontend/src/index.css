@@ -4,14 +4,16 @@
 
 @layer base {
   :root {
-    /* 默认主题：米白 #f5ecd0 */
+    /* 默认主题：米白 #f5ecd0；分界线黑色（米色背景下更清晰） */
     --app-bg: #f5ecd0;
     --app-navbar-bg: rgba(245, 236, 208, 0.9);
+    --app-divider: #000000;
   }
   :root[data-theme="light"] {
     /* 纯白主题 */
     --app-bg: #ffffff;
     --app-navbar-bg: rgba(255, 255, 255, 0.9);
+    --app-divider: #e5e7eb;
   }
   body {
     @apply antialiased text-gray-900;

@@ -23,8 +23,8 @@ export default function Layout({ children }: LayoutProps) {
 
   return (
     <div className="min-h-screen bg-paper">
-      {/* 顶部导航 */}
-      <header className="sticky top-0 z-50 backdrop-blur-md border-b border-gray-100" style={{ backgroundColor: "var(--app-navbar-bg)" }}>
+      {/* 顶部导航（分界线颜色跟随主题：米色=黑色，纯白=浅灰） */}
+      <header className="sticky top-0 z-50 backdrop-blur-md border-b" style={{ backgroundColor: "var(--app-navbar-bg)", borderColor: "var(--app-divider)" }}>
         <div className="max-w-6xl mx-auto px-4 flex items-center h-14">
           {/* Logo */}
           <Link
