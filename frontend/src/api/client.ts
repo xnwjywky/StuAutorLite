@@ -36,8 +36,14 @@ apiClient.interceptors.response.use(
   (response) => response.data,
   (error) => {
     const url = error.config?.url || "";
+    const status = error.response?.status;
     const detail = error.response?.data?.detail || error.response?.data || error.message;
-    console.error(`[API Error] ${url} → ${detail}`);
+    // 401 时给出鉴权配置指引：APP_KEY 已启用但前端 VITE_APP_KEY 未同步配置（或值不一致）
+    if (status === 401 && !APP_KEY) {
+      console.error(`[API Error] ${url} → ${detail}\n提示：后端已启用 APP_KEY 鉴权，但前端未配置 VITE_APP_KEY（见 frontend/.env），所有 /api 接口将返回 401`);
+    } else {
+      console.error(`[API Error] ${url} → ${detail}`);
+    }
     return Promise.reject(error);
   }
 );

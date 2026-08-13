@@ -12,7 +12,7 @@ import TrainingCurve from "../components/TrainingCurve";
 import MNISTDrawCanvas from "../components/MNISTDrawCanvas";
 import ReflectionStage from "../components/ReflectionStage";
 import { useMNISTStore, computeConfigFingerprint } from "../stores/mnistStore";
-import { saveQuestion, saveAnalysis, callMentor, callDataAnalyst, hasAgentConfig, logAgentError } from "../api/service";
+import { saveQuestion, saveAnalysis, callMentor, callDataAnalyst, hasAgentConfig, logAgentError, getMnistDataStatus, retryMnistData } from "../api/service";
 import { detectBaseUrl } from "../api/client";
 import { archiveSession } from "./Archive";
 import { renderMarkdown } from "../utils/markdown";
@@ -343,6 +343,9 @@ function Stage3() {
   const [curEpoch, setCurEpoch] = useState(0);
   const [totEpochs, setTotEpochs] = useState(0);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  // MNIST 数据准备状态（下载在后台进行，未就绪时训练按钮禁用 + 横幅提示）
+  const [dataStatus, setDataStatus] = useState<{ ready: boolean; downloading: boolean; error: string | null; progress: string; retry_count: number } | null>(null);
+  const [retrying, setRetrying] = useState(false);
   const [device, setDevice] = useState<string>("");            // CPU / CUDA / NPU / MPS
   const [deviceUtil, setDeviceUtil] = useState(0);              // 0-100 使用率（来自真实设备采样）
   const [deviceUtilLabel, setDeviceUtilLabel] = useState("");   // "compute" | "memory" | ""
@@ -372,6 +375,31 @@ function Stage3() {
       }
     };
   }, []);
+
+  // MNIST 数据状态轮询：进入页面查询一次，未就绪时每 5s 轮询直到就绪
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const fetchStatus = () => {
+      getMnistDataStatus().then(setDataStatus).catch(() => {});
+    };
+    fetchStatus();
+    timer = setInterval(() => {
+      if (!dataStatus?.ready) fetchStatus();
+    }, 5000);
+    return () => { if (timer) clearInterval(timer); };
+  }, [dataStatus?.ready]);
+
+  // 数据就绪瞬间自动恢复：清除"数据准备中"错误提示
+  useEffect(() => {
+    if (dataStatus?.ready && errorDetail?.includes("数据准备中")) {
+      setErrorDetail(null);
+    }
+  }, [dataStatus?.ready]);
+
+  const handleRetry = async () => {
+    setRetrying(true);
+    try { await retryMnistData(); } finally { setRetrying(false); }
+  };
 
   // 进入 Stage3 时检查缓存
   useEffect(() => {
@@ -441,6 +469,14 @@ function Stage3() {
 
       if (!resp.ok) {
         let errBody = ""; try { errBody = await resp.text(); } catch {}
+        // MNIST_DOWNLOAD_NONBLOCKING：数据未就绪 503 → 明确提示"数据准备中"
+        if (resp.status === 503) {
+          let msg = "MNIST 数据准备中，请稍候…";
+          try { const j = JSON.parse(errBody); msg = (j.detail && (typeof j.detail === "object" ? j.detail.message : j.detail)) || msg; } catch {}
+          setPhaseText(`⏳ ${msg}`);
+          setErrorDetail(`⏳ ${msg}\n数据集（约 64MB）正在后台下载，完成后会自动开始训练。`);
+          return;
+        }
         setPhaseText(`后端返回错误 HTTP ${resp.status}`);
         setErrorDetail(errBody.slice(0, 500) || `HTTP ${resp.status}`);
         return;
@@ -464,6 +500,25 @@ function Stage3() {
           try { event = JSON.parse(trimmed.slice(6)); } catch (e) { buffer = trimmed + "\n\n" + buffer; continue; }
 
           switch (event.type) {
+            case "data_pending":
+              // MNIST_DOWNLOAD_NONBLOCKING：数据未就绪时后端推送，前端展示状态并等待 done/aborted
+              if (event.status) setDataStatus(event.status);
+              setPhaseText(`⏳ ${event.message || "MNIST 数据准备中，请稍候…"}`);
+              break;
+            case "done":
+              if (event.aborted) {
+                setPhaseText("数据准备中，训练已暂停，请稍后重试");
+                setErrorDetail("MNIST 数据准备中，训练已暂停。数据集下载完成后可直接重新点击「开始训练」。");
+                break;
+              }
+              setPhaseText(event.message || "实验完成");
+              store.set({
+                experimentResult: { experiment_batch_id: Date.now().toString(36), status: event.status, summary: event.summary, runs: event.runs },
+                trainingCurve: curveRef.current,
+                resultFingerprint: computeConfigFingerprint(store.selectedArchitecture, store.hyperparameters),
+                trainingCompletedAt: Date.now(),
+              });
+              break;
             case "device_info":
               setDevice(event.selected || event.device || "CPU");
               setDeviceUtil(0);
@@ -503,15 +558,6 @@ function Stage3() {
               break;
             }
             case "train_done": setPhaseText(event.message || `训练完成! 测试准确率 ${((event.test_acc||0)*100).toFixed(1)}%`); break;
-            case "done":
-              setPhaseText(event.message || "实验完成");
-              store.set({
-                experimentResult: { experiment_batch_id: Date.now().toString(36), status: event.status, summary: event.summary, runs: event.runs },
-                trainingCurve: curveRef.current,
-                resultFingerprint: computeConfigFingerprint(store.selectedArchitecture, store.hyperparameters),
-                trainingCompletedAt: Date.now(),
-              });
-              break;
             case "recog_demo": setRecogDemo({ samples: event.samples || [], accuracy: event.accuracy || "" }); break;
             case "error": setPhaseText(`训练错误: ${event.message}`); setErrorDetail(event.message); break;
           }
@@ -528,12 +574,33 @@ function Stage3() {
     <StageContainer step={3} title="运行实验" actions={<div className="flex gap-3 w-full justify-between"><button className="btn-secondary" onClick={() => store.setStage("EXPERIMENT_DESIGNED")}>← 上一步</button><button className="btn-primary" onClick={() => store.setStage("RESULT_ANALYZED")} disabled={!result}>查看结果 → 分析</button></div>}>
       {/* 配置卡片 */}
       <div className="card">
+        {/* MNIST 数据状态横幅（仅数据未就绪时显示） */}
+        {dataStatus && !dataStatus.ready && (
+          <div className={`mb-4 rounded-lg p-3 border ${dataStatus.error ? "border-red-200 bg-red-50/30" : "border-amber-200 bg-amber-50/30"}`}>
+            {dataStatus.error ? (
+              <>
+                <p className="text-sm text-red-700">⚠️ MNIST 数据下载失败</p>
+                <p className="text-xs text-red-500 mt-1">{dataStatus.error}</p>
+                <button className="btn-secondary text-xs mt-2" onClick={handleRetry} disabled={retrying}>
+                  {retrying ? "重试中…" : "🔄 重试下载"}
+                </button>
+              </>
+            ) : dataStatus.downloading ? (
+              <>
+                <p className="text-sm text-amber-700">⏳ {dataStatus.progress || "MNIST 数据下载中…"}</p>
+                <p className="text-xs text-gray-400 mt-1">MNIST 数据集（约 64MB）正在后台下载，完成后即可开始训练。其他实验不受影响。</p>
+              </>
+            ) : (
+              <p className="text-sm text-amber-700">⏳ MNIST 数据准备中…</p>
+            )}
+          </div>
+        )}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div><h2 className="font-semibold">训练监控</h2><p className="text-sm text-gray-400">{archName} | lr={hp.learningRate} bs={hp.batchSize} epochs={hp.epochs} opt={hp.optimizer}</p></div>
           <button className="btn-primary text-lg px-6"
             onClick={startTraining}
-            disabled={running || !!result}>
-            {running ? "⏳ 训练中..." : result ? "✓ 训练已完成" : "▶ 开始训练"}
+            disabled={running || !!result || (dataStatus !== null && !dataStatus.ready)}>
+            {running ? "⏳ 训练中..." : result ? "✓ 训练已完成" : dataStatus !== null && !dataStatus.ready ? "等待数据…" : "▶ 开始训练"}
           </button>
         </div>
         {/* epoch 进度条 — 有数据后显示 */}
@@ -717,6 +784,11 @@ function DrawInfer() {
       });
       if (!resp.ok) {
         const txt = await resp.text();
+        // MNIST_DOWNLOAD_NONBLOCKING：数据未就绪 503 → 提示"数据准备中"
+        if (resp.status === 503) {
+          setInferError("⏳ MNIST 数据准备中，图片识别暂不可用，请稍后重试");
+          return;
+        }
         let err = txt.slice(0, 300);
         try { const j = JSON.parse(txt); err = j.detail || err; } catch {}
         setInferError(err);

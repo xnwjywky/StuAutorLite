@@ -5,6 +5,7 @@
  * - API Key 始终掩码显示（不提供明文查看按钮）
  * - 多配置时可选启用特定一个或全部停用（停用后 Agent 回退到内置模板）
  * - 配置持久化到 sessionStorage
+ * - 默认接入 DeepSeek（OpenAI 兼容）；右上角「本地代理」可一键切换为本地大模型
  */
 import { useState } from "react";
 import Layout from "../components/Layout";
@@ -13,8 +14,6 @@ import {
   maskApiKey,
   AGENT_NAMES,
   isLocalBaseUrl,
-  loadCustomLocalUrl,
-  saveCustomLocalUrl,
 } from "../stores/agentConfigStore";
 
 const AGENT_LABELS: Record<string, string> = {
@@ -26,47 +25,52 @@ const AGENT_LABELS: Record<string, string> = {
   algorithm_tutor: "算法讲解员",
 };
 
-/** 常用服务商预设：一键填充 Base URL 与模型 */
-const PRESETS: { label: string; baseUrl: string; model: string }[] = [
-  { label: "DeepSeek", baseUrl: "https://api.deepseek.com/anthropic", model: "deepseek-v4-flash" },
-  { label: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-4o" },
-];
+/** 默认（云端 DeepSeek）配置值 */
+const DEFAULT_FORM = {
+  label: "testKey",
+  apiKey: "",
+  baseUrl: "https://api.deepseek.com/anthropic",
+  model: "deepseek-v4-flash",
+  agentNames: [] as string[],
+};
+
+/** 本地代理配置值（一键切换；模型默认 dsv4，glm-52 可手填） */
+const LOCAL_FORM = {
+  label: "testToken",
+  apiKey: "",
+  baseUrl: "http://127.0.0.1:11434/v1",
+  model: "dsv4",
+  agentNames: [] as string[],
+};
 
 export default function AgentConfigPage() {
-  const { configs, add, remove, load, activate, deactivateAll, localServices, customServices, probingCustom, probeCustom, clearCustom } = useAgentConfigStore();
+  const { configs, add, remove, load, activate, deactivateAll } = useAgentConfigStore();
   const [adding, setAdding] = useState(false);
-  const [customUrl, setCustomUrl] = useState<string>(loadCustomLocalUrl);
-  const [probeError, setProbeError] = useState<string | null>(null);
-  const [probeMsg, setProbeMsg] = useState<string | null>(null);
+  // 本地代理勾选：勾选时替换默认值为 LOCAL_FORM，未勾选保持 DEFAULT_FORM
+  const [localMode, setLocalMode] = useState(false);
 
   // ── 新配置表单 ──
-  const [form, setForm] = useState({
-    label: "test_key",
-    apiKey: "",
-    baseUrl: PRESETS[0].baseUrl,
-    model: PRESETS[0].model,
-    agentNames: [] as string[],
-  });
+  const [form, setForm] = useState<{
+    label: string; apiKey: string; baseUrl: string; model: string; agentNames: string[];
+  }>({ ...DEFAULT_FORM });
 
-  const handleProbe = async () => {
-    const url = customUrl.trim();
-    if (!url || probingCustom) return;
-    saveCustomLocalUrl(url);
-    setProbeError(null);
-    setProbeMsg(null);
-    const r = await probeCustom(url);
-    if (r.found) {
-      setProbeMsg("✅ 已探测到本地模型，点击下方模型填入配置");
-    } else {
-      setProbeError(r.error || "未探测到可用模型");
-    }
+  /** 切换「本地代理」勾选：勾选替换默认值为本地代理配置，取消恢复原有默认值 */
+  const handleLocalToggle = (checked: boolean) => {
+    setLocalMode(checked);
+    setForm((f) => ({
+      ...f,
+      label: checked ? LOCAL_FORM.label : DEFAULT_FORM.label,
+      baseUrl: checked ? LOCAL_FORM.baseUrl : DEFAULT_FORM.baseUrl,
+      model: checked ? LOCAL_FORM.model : DEFAULT_FORM.model,
+    }));
   };
 
   const handleAdd = () => {
     const isLocal = isLocalBaseUrl(form.baseUrl);
     if (!form.label.trim() || (!form.apiKey.trim() && !isLocal)) return;
     add({ ...form, apiKey: form.apiKey || "local", provider: "openai" as const, source: isLocal ? "local" as const : "cloud" as const });
-    setForm({ label: "test_key", apiKey: "", baseUrl: PRESETS[0].baseUrl, model: PRESETS[0].model, agentNames: [] });
+    setForm({ ...DEFAULT_FORM });
+    setLocalMode(false);
     setAdding(false);
   };
 
@@ -90,101 +94,18 @@ export default function AgentConfigPage() {
           <button className="btn-primary" onClick={() => setAdding(true)}>+ 添加配置</button>
         </div>
 
-        {/* ── 本地模型检测结果（仅检测到本地服务时显示）── */}
-        {localServices && localServices.length > 0 && (
-          <div className="card mb-6 border-green-100 bg-green-50/20">
-            <h3 className="font-semibold text-sm text-gray-700 mb-3">🟢 检测到本地模型服务（点击模型填入配置）</h3>
-            {localServices.map((svc) => (
-              <div key={svc.name} className="mb-3 last:mb-0">
-                <p className="text-xs text-gray-500 mb-1">{svc.name} · {svc.model_count} 个模型 · {svc.v1_base}</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {svc.models.map((m) => (
-                    <button key={m} type="button"
-                      onClick={() => {
-                        setForm({
-                          label: `${svc.name}-${m}`,
-                          apiKey: "",
-                          baseUrl: svc.v1_base,
-                          model: m,
-                          agentNames: [],
-                        });
-                        setAdding(true);
-                      }}
-                      className="px-2 py-0.5 rounded-full text-[11px] border border-green-200 text-green-700 hover:bg-green-100">
-                      {m}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
-            <p className="text-[10px] text-gray-400 mt-3">本地服务默认无 API Key，保存后即自动填入占位 Key 并标记为「本地」配置</p>
-          </div>
-        )}
-
-        {/* ── 自定义本地模型地址 ── */}
-        <div className="card mb-6 border-amber-100 bg-amber-50/20">
-          <h3 className="font-semibold text-sm text-gray-700 mb-2">📍 自定义本地模型地址</h3>
-          <p className="text-[11px] text-gray-500 mb-3">
-            默认探测仅覆盖 Ollama(11434) / LM Studio(1234) / vLLM(8000) / llama.cpp(8080)。
-            若你的服务在其他端口或另一台机器，在此填写地址后点「检测」（支持 Ollama /api/tags 与 OpenAI /v1/models 两种协议）。
-          </p>
-          <div className="flex gap-2">
-            <input
-              className="flex-1 px-3 py-2 border rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-amber-300"
-              placeholder="例如 http://127.0.0.1:11435 或 http://192.168.1.20:8080"
-              value={customUrl}
-              onChange={(e) => setCustomUrl(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") handleProbe(); }}
-            />
-            <button
-              className="btn-secondary text-xs"
-              onClick={handleProbe}
-              disabled={!customUrl.trim() || probingCustom}
-            >
-              {probingCustom ? "检测中…" : "检测"}
-            </button>
-          </div>
-          {probeError && <p className="text-xs text-red-500 mt-2">⚠️ {probeError}</p>}
-          {probeMsg && !probeError && <p className="text-xs text-green-600 mt-2">{probeMsg}</p>}
-        </div>
-
-        {/* ── 自定义地址探测结果（仅探测到模型时显示）── */}
-        {customServices.length > 0 && (
-          <div className="card mb-6 border-amber-200 bg-amber-50/30">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-sm text-gray-700">📍 自定义地址探测结果（点击模型填入配置）</h3>
-              <button className="text-xs text-gray-400 hover:text-gray-600" onClick={clearCustom}>清除</button>
-            </div>
-            {customServices.map((svc) => (
-              <div key={svc.v1_base} className="mb-3 last:mb-0">
-                <p className="text-xs text-gray-500 mb-1">{svc.name} · {svc.model_count} 个模型 · {svc.v1_base}</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {svc.models.map((m) => (
-                    <button key={m} type="button"
-                      onClick={() => {
-                        setForm({
-                          label: `${svc.name}-${m}`,
-                          apiKey: "",
-                          baseUrl: svc.v1_base,
-                          model: m,
-                          agentNames: [],
-                        });
-                        setAdding(true);
-                      }}
-                      className="px-2 py-0.5 rounded-full text-[11px] border border-amber-300 text-amber-700 hover:bg-amber-100">
-                      {m}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
         {/* ── 添加配置表单 ── */}
         {adding && (
           <div className="card mb-6 border-primary-200 bg-primary-50/20">
-            <h2 className="font-semibold text-gray-800 mb-4">新配置</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-gray-800">新配置</h2>
+              <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none">
+                <input type="checkbox" checked={localMode}
+                  onChange={(e) => handleLocalToggle(e.target.checked)}
+                  className="w-3.5 h-3.5 accent-gray-900" />
+                本地代理
+              </label>
+            </div>
             <div className="space-y-3">
               <div>
                 <label className="text-xs font-medium text-gray-500">配置名称</label>
@@ -195,7 +116,7 @@ export default function AgentConfigPage() {
               <div>
                 <label className="text-xs font-medium text-gray-500">API Key</label>
                 <input className="w-full mt-1 px-3 py-2 border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-300"
-                  placeholder="sk-..." value={form.apiKey}
+                  placeholder="OpenAI 兼容接口的访问密钥（Bearer token）" value={form.apiKey}
                   onChange={(e) => setForm((f) => ({ ...f, apiKey: e.target.value }))} />
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -203,26 +124,16 @@ export default function AgentConfigPage() {
                   <label className="text-xs font-medium text-gray-500">API Base URL</label>
                   <input className="w-full mt-1 px-3 py-2 border rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-gray-300"
                     value={form.baseUrl} onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))}
-                    placeholder="https://api.deepseek.com/v1 或 https://api.openai.com/v1" />
+                    placeholder="https://网关地址/v1（OpenAI 兼容）" />
                 </div>
                 <div>
                   <label className="text-xs font-medium text-gray-500">模型名称</label>
                   <input className="w-full mt-1 px-3 py-2 border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-gray-300"
                     value={form.model} onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
-                    placeholder="例如 deepseek-v4-flash 或 gpt-4o" />
+                    placeholder="deepseek-v4-flash（本地代理可填 dsv4 / glm-52）" />
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-[10px] text-gray-400 mr-1">快捷填充：</span>
-                {PRESETS.map((p) => (
-                  <button key={p.label} type="button"
-                    onClick={() => setForm((f) => ({ ...f, baseUrl: p.baseUrl, model: p.model }))}
-                    className="px-2 py-0.5 rounded-full text-[11px] border border-gray-200 text-gray-500 hover:bg-gray-100">
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-              <p className="text-[10px] text-gray-400">协议由后端根据 Base URL 自动检测（deepseek/siliconflow → OpenAI 协议，/anthropic → Anthropic 协议）</p>
+              <p className="text-[10px] text-gray-400">后端通过 OpenAI 兼容接口访问：{`{API Base URL}`}/chat/completions（Authorization: Bearer &lt;API Key&gt;），与已有配置方式互不影响</p>
               <div>
                 <label className="text-xs font-medium text-gray-500 mb-1 block">
                   分配给 Agent（不选 = 所有 Agent 共用）
@@ -310,7 +221,7 @@ export default function AgentConfigPage() {
             <li>• 多配置时点绿色「使用中」按钮切换启用项，或再次点击停用全部（都不使用 → Agent 回退模板）</li>
             <li>• 请勿在公共电脑保存密钥；不要将 Key 分享给他人</li>
             <li>• 共享配置：不指定 Agent 则所有 Agent 共用同一个 Key；专属配置：指定 Agent 后，只有该 Agent 使用此 Key</li>
-            <li>• 快捷填充支持 DeepSeek、OpenAI 两种常用服务商</li>
+            <li>• 默认接入 DeepSeek（API Key + API Base URL + 模型名称）；右上角「本地代理」可一键切换为本地大模型（模型默认 dsv4，glm-52 可手填）</li>
           </ul>
         </div>
       </div>

@@ -260,6 +260,19 @@ export async function checkMNISTDeps(): Promise<{ deps_ok: boolean; error: strin
   return apiClient.get("/api/mnist/check") as Promise<{ deps_ok: boolean; error: string | null; python: string }>;
 }
 
+/** MNIST 数据准备状态（MNIST_DOWNLOAD_NONBLOCKING：下载在后台，前端据此展示横幅） */
+export async function getMnistDataStatus(): Promise<{
+  ready: boolean; downloading: boolean; error: string | null;
+  progress: string; retry_count: number;
+}> {
+  return apiClient.get("/api/mnist/data-status") as Promise<any>;
+}
+
+/** 手动触发 MNIST 数据重新下载（下载失败后点"重试"调用） */
+export async function retryMnistData(): Promise<{ ok: boolean; message: string; status: any }> {
+  return apiClient.post("/api/mnist/data-retry") as Promise<any>;
+}
+
 // ── 统一图像识别实验（合并图形+数字） ──────────────────────────
 export async function runImageRecogExperiment(data: {
   session_id: number; experiment_type: string; algorithms: string[];

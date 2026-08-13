@@ -36,6 +36,10 @@ function candidateUrls(): string[] {
   return urls;
 }
 
+// 与 client.ts 一致：配置了 VITE_APP_KEY 时健康检查也带上 X-App-Key，
+// 避免"APP_KEY 已启用但前端未同步配置"时仅 health 可通、其余接口全部 401 的假象
+const HEALTH_APP_KEY = (import.meta.env.VITE_APP_KEY ?? "").trim();
+
 export function useBackendHealth(): HealthState {
   const [online, setOnline] = useState(true);
   const [checking, setChecking] = useState(true);
@@ -57,7 +61,10 @@ export function useBackendHealth(): HealthState {
       try {
         const ac = new AbortController();
         const timer = setTimeout(() => ac.abort(), 5000);
-        const resp = await fetch(healthUrl, { signal: ac.signal });
+        const resp = await fetch(healthUrl, {
+          signal: ac.signal,
+          ...(HEALTH_APP_KEY ? { headers: { "X-App-Key": HEALTH_APP_KEY } } : {}),
+        });
         clearTimeout(timer);
 
         if (!mountedRef.current) return;

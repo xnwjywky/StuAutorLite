@@ -105,12 +105,55 @@ def check_mnist_deps():
 
 @router.get("/architectures")
 def get_architectures():
-    return {"architectures": PRESET_ARCHITECTURES}
+    # 架构信息是静态的，不依赖数据；附加数据状态供前端展示"数据准备中"
+    from app.core.mnist.data_loader import get_data_status
+    return {"architectures": PRESET_ARCHITECTURES, "data_status": get_data_status()}
+
+
+def _require_data_ready():
+    """数据未就绪时抛出 503（不抢占训练锁）；就绪返回 None。
+
+    供 /run、/run-stream、/infer 等依赖 MNIST 数据集的端点调用。
+    """
+    from app.core.mnist.data_loader import is_data_ready, get_data_status
+
+    if is_data_ready():
+        return
+    st = get_data_status()
+    detail = "MNIST 数据准备中" if st["downloading"] else "MNIST 数据未就绪"
+    if st["error"]:
+        detail = f"MNIST 数据下载失败：{st['error']}，请重试"
+    raise HTTPException(
+        status_code=503,
+        detail={"message": detail, "data_status": st, "retry_after": 10},
+    )
+
+
+@router.get("/data-status")
+def get_mnist_data_status():
+    """MNIST 数据准备状态（供前端横幅/轮询展示）。"""
+    from app.core.mnist.data_loader import get_data_status
+    return get_data_status()
+
+
+@router.post("/data-retry")
+async def retry_mnist_download():
+    """手动触发 MNIST 数据重新下载（下载失败后用户点"重试"调此端点）。"""
+    from app.core.mnist.data_loader import ensure_mnist_data_async, get_data_status, is_data_ready
+
+    if is_data_ready():
+        return {"ok": True, "message": "数据已就绪", "status": get_data_status()}
+    # 异步触发下载，不阻塞响应（ensure 内部有并发锁，重复触发安全）
+    asyncio.create_task(ensure_mnist_data_async())
+    return {"ok": True, "message": "已触发重新下载", "status": get_data_status()}
 
 
 @router.post("/run")
 def run_mnist(req: MNISTRunRequest, db: DbSession = Depends(get_db)):
     from app.core.mnist.model_manager import ModelManager
+
+    # MNIST_DOWNLOAD_NONBLOCKING：数据未就绪立即 503，不占训练锁
+    _require_data_ready()
 
     # P0-1（MNIST_ACCURACY_FIX）：全局训练互斥——等待其它训练（含后台预训练）
     # 完成，最多 30s；否则返回 409。杜绝 torch CPU 并发训练数据竞争。
@@ -167,6 +210,26 @@ def run_mnist(req: MNISTRunRequest, db: DbSession = Depends(get_db)):
 @router.post("/run-stream")
 async def run_mnist_stream(req: MNISTRunRequest, request: Request):
     from app.core.mnist.model_manager import ModelManager
+
+    # MNIST_DOWNLOAD_NONBLOCKING：数据未就绪时推送 data_pending 事件后正常关闭流，
+    # 不占用训练锁（前端据此展示"数据准备中"横幅并轮询 /data-status）
+    from app.core.mnist.data_loader import is_data_ready, get_data_status
+
+    if not is_data_ready():
+        st = get_data_status()
+
+        async def _data_not_ready_stream():
+            yield f"data: {json.dumps({'type': 'data_pending', 'message': 'MNIST 数据准备中，请稍候', 'status': st}, ensure_ascii=False)}\n\n"
+            if st["downloading"]:
+                await asyncio.sleep(1)
+                yield f"data: {json.dumps({'type': 'data_pending', 'status': get_data_status()}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'aborted': True}, ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(
+            _data_not_ready_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        )
 
     _mnist_log.info(
         "SSE stream start: session=%d arch=%s epochs=%d",
@@ -294,6 +357,9 @@ async def infer_upload_image(
     model_id: "minicnn" | "standardcnn" | "deepcnn" | "user"
     返回: {model_id, predicted, confidence, probabilities, model_name}
     """
+    # MNIST_DOWNLOAD_NONBLOCKING：数据未就绪时 503，前端提示"图片识别暂不可用"
+    _require_data_ready()
+
     from app.core.mnist.model_manager import (
         ALLOWED_MODEL_IDS,
         ModelManager,

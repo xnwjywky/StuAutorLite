@@ -92,6 +92,12 @@ def _build_llm(
         provider = "openai"
     elif "/anthropic" in base_lower or provider == "anthropic":
         provider = "anthropic"
+    else:
+        # OpenAI 兼容网关（新路径）：地址不含已有关键字时，强制走 OpenAI 协议
+        # 并归一化到 /v1/chat/completions（用户可填 https://网关 或 https://网关/v1）
+        provider = "openai"
+        if not base.endswith("/v1") and "/v1" not in base_lower:
+            base = base.rstrip("/") + "/v1"
 
     return LLMClient(api_key, base, model, provider)
 
