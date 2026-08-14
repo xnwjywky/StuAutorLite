@@ -378,7 +378,9 @@ function Stage5() {
     setErrorMsg(null);
   }, []);
 
-  useEffect(() => { return () => { doCleanup(); store.cleanup(); }; }, []);
+  // 卸载时只清理本地运行状态；不能调用 store.cleanup()（会把 experimentResult 置空，
+  // 导致进入 Stage6 分析结果页时图表数据丢失）
+  useEffect(() => { return () => { doCleanup(); }; }, []);
 
   const execRun = async () => {
     doCleanup();
@@ -446,7 +448,12 @@ function Stage5() {
     }
   };
 
-  useEffect(() => { if (!store.experimentResult && !running) execRun(); }, []);
+  // 自动运行延迟到当前渲染周期之后：StrictMode 下 effect 会 setup→cleanup→setup 双触发，
+  // 第一次的定时器会被 cleanup 清除，确保 /run-stream 只被调用一次
+  useEffect(() => {
+    const t = setTimeout(() => { if (!store.experimentResult && !running) execRun(); }, 0);
+    return () => clearTimeout(t);
+  }, []);
 
   const result = store.experimentResult;
   const displayRuns: any[] = result?.runs ? result.runs.filter((r: any) => (r.trial ?? 1) === store.selectedTrial) : [];
