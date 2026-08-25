@@ -200,7 +200,7 @@ function TaskAndQuestion() {
         <h2 className="font-semibold text-gray-700 mb-3">选择或输入你想研究的问题</h2>
         <div className="grid gap-2 mb-3">{QUESTION_TEMPLATES.map((t) => (
           <button key={t} onClick={() => handleSelectQuestion(t)}
-            className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedQ === t ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}>{t}</button>
+            className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedQ === t ? "bg-gray-900 text-white" : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-100"}`}>{t}</button>
         ))}</div>
         <textarea className="w-full min-h-[60px] p-3 border rounded-lg text-sm resize-y" placeholder="或用你自己的话描述：二分查找是不是总比随机猜快？"
           value={store.rawQuestion} onChange={(e) => store.set({ rawQuestion: e.target.value })} />
@@ -347,7 +347,7 @@ function Stage5() {
         {result && store.numTrials > 1 && (
           <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100 flex-wrap">
             <span className="text-xs text-gray-500 font-medium">切换回合：</span>
-            {Array.from({ length: store.numTrials }, (_, i) => i + 1).map((t) => <button key={t} onClick={() => store.set({ selectedTrial: t })} className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${store.selectedTrial === t ? "bg-gray-900 text-white shadow-sm" : "bg-gray-100 text-gray-500 hover:bg-gray-200"}`}>第{t}回</button>)}
+            {Array.from({ length: store.numTrials }, (_, i) => i + 1).map((t) => <button key={t} onClick={() => store.set({ selectedTrial: t })} className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${store.selectedTrial === t ? "bg-gray-900 text-white shadow-sm" : "bg-white text-gray-500 border border-gray-200 hover:bg-gray-100"}`}>第{t}回</button>)}
           </div>
         )}
       </div>

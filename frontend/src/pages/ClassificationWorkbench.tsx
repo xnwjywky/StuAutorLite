@@ -196,7 +196,7 @@ function TaskAndQuestion() {
         <h2 className="font-semibold text-gray-700 mb-3">选择或输入你想研究的问题</h2>
         <div className="grid gap-2 mb-3">{QUESTION_TEMPLATES.map((t) => (
           <button key={t} onClick={() => handleSelectQuestion(t)}
-            className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedQ === t ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}>{t}</button>
+            className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedQ === t ? "bg-gray-900 text-white" : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-100"}`}>{t}</button>
         ))}</div>
         <textarea className="w-full min-h-[60px] p-3 border rounded-lg text-sm resize-y" placeholder="或用你自己的话描述：KNN 是不是比决策树更准确？"
           value={store.rawQuestion} onChange={(e) => store.set({ rawQuestion: e.target.value })} />
@@ -304,7 +304,7 @@ function Stage4() {
         <div className="card"><h3 className="font-semibold text-gray-700 mb-2 text-sm">每次重复实验</h3><div className="space-y-1">{[1, 3, 5].map((t) => <button key={t} onClick={() => store.set({ numTrials: t })} className={`block w-full text-left px-3 py-1.5 rounded text-sm ${store.numTrials === t ? "bg-gray-900 text-white font-medium" : "text-gray-500 hover:bg-gray-50"}`}>{t} 次</button>)}</div></div>
         <div className="card"><h3 className="font-semibold text-gray-700 mb-2 text-sm">训练数据比例</h3><div className="space-y-1">{TRAIN_RATIOS.map((r) => <button key={r} onClick={() => store.set({ trainRatio: r })} className={`block w-full text-left px-3 py-1.5 rounded text-sm ${store.trainRatio === r ? "bg-gray-900 text-white font-medium" : "text-gray-500 hover:bg-gray-50"}`}>{(r * 100).toFixed(0)}%</button>)}</div></div>
       </div>
-      <div className="card"><h2 className="font-semibold text-gray-700 mb-2 text-sm">我要观察的指标</h2><div className="flex flex-wrap gap-2">{METRICS.map((m) => <button key={m.key} onClick={() => toggleMetric(m.key)} className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${store.selectedMetrics.includes(m.key) ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-500 border border-gray-100 hover:bg-gray-100"}`}>{m.label}</button>)}</div></div>
+      <div className="card"><h2 className="font-semibold text-gray-700 mb-2 text-sm">我要观察的指标</h2><div className="flex flex-wrap gap-2">{METRICS.map((m) => <button key={m.key} onClick={() => toggleMetric(m.key)} className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${store.selectedMetrics.includes(m.key) ? "bg-gray-900 text-white" : "bg-white text-gray-500 border border-gray-200 hover:bg-gray-100"}`}>{m.label}</button>)}</div></div>
     </StageContainer>
   );
 }
@@ -354,7 +354,7 @@ function Stage5() {
           <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100 flex-wrap">
             <span className="text-xs text-gray-500 font-medium">切换组别：</span>
             {Array.from({ length: store.numTrials }, (_, i) => i + 1).map((t) => (
-              <button key={t} onClick={() => setSelectedTrial(t)} className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${selectedTrial === t ? "bg-gray-900 text-white shadow-sm" : "bg-gray-100 text-gray-500 hover:bg-gray-200"}`}>第{t}组</button>
+              <button key={t} onClick={() => setSelectedTrial(t)} className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${selectedTrial === t ? "bg-gray-900 text-white shadow-sm" : "bg-white text-gray-500 border border-gray-200 hover:bg-gray-100"}`}>第{t}组</button>
             ))}
           </div>
         )}
@@ -442,10 +442,10 @@ function Stage6() {
           data={Object.entries(store.experimentResult.summary).map(([a, s]: any) => ({ classifier: a, accuracy: s.avg_accuracy * 100, precision: s.avg_precision * 100, recall: s.avg_recall * 100, f1: s.avg_f1 * 100 }))}
           xKey="classifier"
           bars={[
-            { key: "accuracy", name: "准确率 (%)", color: "#3b82f6" },
+            { key: "accuracy", name: "准确率 (%)", color: "#3964fe" },
             { key: "precision", name: "精确率 (%)", color: "#22c55e" },
-            { key: "recall", name: "召回率 (%)", color: "#f59e0b" },
-            { key: "f1", name: "F1 (%)", color: "#ef4444" },
+            { key: "recall", name: "召回率 (%)", color: "#f7ad31" },
+            { key: "f1", name: "F1 (%)", color: "#f25a5a" },
           ]}
         />
       )}

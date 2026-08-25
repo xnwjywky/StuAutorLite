@@ -34,7 +34,7 @@ export default function HypothesisForm() {
           <div className="space-y-2">
             {GUIDES.map((g) => (
               <button key={g} onClick={() => setHypothesis((p) => p ? p + "\n" + g : g)}
-                className="block w-full text-left px-3 py-2 bg-gray-50 rounded-lg text-sm text-gray-600 hover:bg-gray-100">{g}</button>
+                className="block w-full text-left px-3 py-2 bg-white rounded-lg text-sm text-gray-600 border border-gray-200 hover:bg-gray-100">{g}</button>
             ))}
           </div>
         </div>

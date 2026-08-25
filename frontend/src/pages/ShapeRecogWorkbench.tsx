@@ -164,7 +164,7 @@ function TaskAndQuestion() {
       <div className="card"><h3 className="font-semibold mb-2">👁️ 图形识别算法研究</h3><p className="text-sm text-gray-500">生成圆形、正方形、三角形的像素图像并加噪声，研究不同识别算法的表现。</p></div>
       <div className="card">
         <h2 className="font-semibold text-gray-700 mb-3">选择或输入你想研究的问题</h2>
-        <div className="grid gap-2 mb-3">{QUESTION_TEMPLATES.map(t => <button key={t} onClick={() => handleSelectQuestion(t)} className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedQ === t ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}>{t}</button>)}</div>
+        <div className="grid gap-2 mb-3">{QUESTION_TEMPLATES.map(t => <button key={t} onClick={() => handleSelectQuestion(t)} className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedQ === t ? "bg-gray-900 text-white" : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-100"}`}>{t}</button>)}</div>
         <textarea className="w-full min-h-[60px] p-3 border rounded-lg text-sm resize-y" placeholder="或用你自己的话描述" value={store.rawQuestion} onChange={e => store.set({ rawQuestion: e.target.value })} />
         <button className="btn-primary mt-3" onClick={handleSuggest} disabled={loading || !store.rawQuestion.trim()}>{loading ? "生成中..." : "AI 帮我转化"}</button>
         {store.suggestedQuestions.length > 0 && (
@@ -248,7 +248,7 @@ function Stage5() {
           <button className="btn-primary text-lg px-6" onClick={execRun} disabled={running}>{running ? "⏳ 运行中..." : result ? "🔄 重新运行" : "▶ 开始实验"}</button>
         </div>
         {result && store.numTrials > 1 && (
-          <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100"><span className="text-xs text-gray-500 font-medium">切换组别：</span>{Array.from({length:store.numTrials},(_,i)=>i+1).map(t=><button key={t} onClick={()=>store.set({selectedTrial:t})} className={`px-3 py-1 rounded-full text-xs font-medium ${store.selectedTrial===t?"bg-gray-900 text-white":"bg-gray-100 text-gray-500"}`}>第{t}组</button>)}</div>)}
+          <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100"><span className="text-xs text-gray-500 font-medium">切换组别：</span>{Array.from({length:store.numTrials},(_,i)=>i+1).map(t=><button key={t} onClick={()=>store.set({selectedTrial:t})} className={`px-3 py-1 rounded-full text-xs font-medium ${store.selectedTrial===t?"bg-gray-900 text-white":"bg-white text-gray-500 border border-gray-200"}`}>第{t}组</button>)}</div>)}
       </div>
 
       {/* 各算法准确率汇总卡片 */}

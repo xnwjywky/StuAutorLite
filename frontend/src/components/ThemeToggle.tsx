@@ -1,17 +1,20 @@
-/** 背景色主题切换 — 调色板图标按钮 + 下拉选色（纯白 #ffffff / 米白 #f5ecd0） */
+/** 背景色主题切换 — 调色板图标按钮 + 下拉选色（米白 #f5ecd0 / 纯白 #ffffff / 灰白 #f5f6f7） */
 import { useEffect, useRef, useState } from "react";
 
 const THEME_KEY = "stuautor_theme";
-type Theme = "paper" | "light";
+type Theme = "paper" | "light" | "gray";
 
 const THEMES: { id: Theme; label: string; color: string }[] = [
   { id: "paper", label: "米白", color: "#f5ecd0" },
   { id: "light", label: "纯白", color: "#ffffff" },
+  { id: "gray", label: "灰白", color: "#f5f6f7" },
 ];
 
 function getInitialTheme(): Theme {
   try {
-    return localStorage.getItem(THEME_KEY) === "light" ? "light" : "paper";
+    const saved = localStorage.getItem(THEME_KEY);
+    // 兼容旧版保存的 "dark"（误加的深色主题），回落为默认米白
+    return saved === "light" || saved === "gray" ? saved : "paper";
   } catch {
     return "paper";
   }
@@ -23,7 +26,8 @@ export default function ThemeToggle() {
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme === "light" ? "light" : "";
+    // :root 默认即米白主题，light/dark 走对应变量块；paper 直接写 "paper"（无匹配块 → :root 生效）
+    document.documentElement.dataset.theme = theme;
     try {
       localStorage.setItem(THEME_KEY, theme);
     } catch {}

@@ -167,7 +167,7 @@ export default function ImageRecogVisualizer({ steps = [], algorithmName, labelN
           {done ? "完成" : `播放中 ${Math.round(frame / totalFrames * 100)}%`}
         </span>
         <button onClick={handleReplay}
-          className="text-[10px] px-2 py-0.5 rounded bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700 transition-colors">
+          className="text-[10px] px-2 py-0.5 rounded bg-white text-gray-500 border border-gray-200 hover:bg-gray-100 hover:text-gray-700 transition-colors">
           {done ? "重播" : "重置"}
         </button>
       </div>

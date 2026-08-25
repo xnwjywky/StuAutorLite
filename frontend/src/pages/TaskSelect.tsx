@@ -119,7 +119,7 @@ export default function TaskSelect() {
                 <p className="text-sm text-gray-500 leading-relaxed mb-3 line-clamp-2">{task.description}</p>
                 <div className="flex flex-wrap gap-1.5 mb-4">
                   {task.concepts.map((c) => (
-                    <span key={c} className="text-[11px] bg-gray-50 text-gray-500 px-2 py-0.5 rounded-md border border-gray-100">{c}</span>
+                    <span key={c} className="text-[11px] bg-white text-gray-500 px-2 py-0.5 rounded-md border border-gray-200">{c}</span>
                   ))}
                 </div>
                 {task.available ? (

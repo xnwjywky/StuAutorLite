@@ -141,7 +141,7 @@ export default function ReflectionStage({
         return (
           <div key={qid} className="card">
             <div className="flex items-start gap-2 mb-2">
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 flex-shrink-0">{q.category_label || "通用"}</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white text-gray-500 border border-gray-200 flex-shrink-0">{q.category_label || "通用"}</span>
               <h3 className="font-semibold text-gray-700 text-sm">{i + 1}. {q.question_text}</h3>
             </div>
             <textarea
@@ -175,7 +175,7 @@ export default function ReflectionStage({
                           handleBlur(qid, t.text);
                         }
                       }}
-                      className={`w-full text-left px-2.5 py-1.5 rounded text-[11px] leading-relaxed transition-all ${isActive ? "bg-blue-50 border border-blue-300" : "bg-gray-50 text-gray-500 hover:bg-blue-50/50 border border-gray-100"}`}>
+                      className={`w-full text-left px-2.5 py-1.5 rounded text-[11px] leading-relaxed transition-all ${isActive ? "bg-blue-50 border border-blue-300" : "bg-white text-gray-500 hover:bg-blue-50/50 border border-gray-200"}`}>
                       {t.text.length > 80 ? t.text.slice(0, 80) + "…" : t.text}
                     </button>
                   );

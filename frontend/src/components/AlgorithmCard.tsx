@@ -14,7 +14,7 @@ export default function AlgorithmCard({ name, description, selected = false, onT
       <div className="flex items-center justify-between mb-2">
         <h3 className="font-semibold text-gray-800">{name}</h3>
         <span
-          className={`text-xs px-2 py-0.5 rounded-full transition-colors pointer-events-none ${selected ? "bg-gray-700 text-white" : "bg-gray-100 text-gray-500"}`}
+          className={`text-xs px-2 py-0.5 rounded-full transition-colors pointer-events-none ${selected ? "bg-gray-700 text-white" : "bg-white text-gray-500 border border-gray-200"}`}
         >{selected ? "已选择" : "点击选择"}</span>
       </div>
       <p className="text-sm text-gray-500">{description}</p>

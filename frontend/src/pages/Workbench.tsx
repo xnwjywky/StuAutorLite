@@ -197,7 +197,7 @@ function TaskAndQuestion() {
         <h2 className="font-semibold text-gray-700 mb-3">选择或输入你想研究的问题</h2>
         <div className="grid gap-2 mb-3">{QUESTION_TEMPLATES.map((t) => (
           <button key={t} onClick={() => handleSelectQuestion(t)}
-            className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedQ === t ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}>{t}</button>
+            className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedQ === t ? "bg-gray-900 text-white" : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-100"}`}>{t}</button>
         ))}</div>
         <textarea className="w-full min-h-[60px] p-3 border rounded-lg text-sm resize-y" placeholder="或用你自己的话描述：A* 是不是一直比 BFS 好？"
           value={store.rawQuestion} onChange={(e) => store.set({ rawQuestion: e.target.value })} />
@@ -324,7 +324,7 @@ function Stage4() {
         <div className="card"><h3 className="font-semibold text-gray-700 mb-2 text-sm">障碍物比例</h3><div className="space-y-1">{OBSTACLE_RATIOS.map((r) => <button key={r} onClick={() => store.set({ obstacleRatios: [r] })} className={`block w-full text-left px-3 py-1.5 rounded text-sm ${store.obstacleRatios[0] === r ? "bg-gray-900 text-white font-medium" : "text-gray-500 hover:bg-gray-50"}`}>{(r * 100).toFixed(0)}%</button>)}</div></div>
         <div className="card"><h3 className="font-semibold text-gray-700 mb-2 text-sm">每组重复次数</h3><div className="space-y-1">{TRIALS.map((t) => <button key={t} onClick={() => store.set({ numTrials: t })} className={`block w-full text-left px-3 py-1.5 rounded text-sm ${store.numTrials === t ? "bg-gray-900 text-white font-medium" : "text-gray-500 hover:bg-gray-50"}`}>{t} 次</button>)}</div></div>
       </div>
-      <div className="card"><h2 className="font-semibold text-gray-700 mb-2 text-sm">我要观察的指标</h2><div className="flex flex-wrap gap-2">{METRICS.map((m) => <button key={m.key} onClick={() => toggleMetric(m.key)} className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${store.selectedMetrics.includes(m.key) ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-500 border border-gray-100 hover:bg-gray-100"}`}>{m.label}</button>)}</div></div>
+      <div className="card"><h2 className="font-semibold text-gray-700 mb-2 text-sm">我要观察的指标</h2><div className="flex flex-wrap gap-2">{METRICS.map((m) => <button key={m.key} onClick={() => toggleMetric(m.key)} className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${store.selectedMetrics.includes(m.key) ? "bg-gray-900 text-white" : "bg-white text-gray-500 border border-gray-200 hover:bg-gray-100"}`}>{m.label}</button>)}</div></div>
     </StageContainer>
   );
 }
@@ -458,7 +458,7 @@ function Stage5() {
             <span className="text-xs text-gray-500 font-medium">切换组别：</span>
             {Array.from({ length: store.numTrials }, (_, i) => i + 1).map((t) => (
               <button key={t} onClick={() => setSelectedTrial(t)}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${selectedTrial === t ? "bg-gray-900 text-white shadow-sm" : "bg-gray-100 text-gray-500 hover:bg-gray-200"}`}>
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${selectedTrial === t ? "bg-gray-900 text-white shadow-sm" : "bg-white text-gray-500 border border-gray-200 hover:bg-gray-100"}`}>
                 第{t}组 {editsRef.current[t]?.isEdited ? "✏️ 已编辑" : ""}
               </button>
             ))}

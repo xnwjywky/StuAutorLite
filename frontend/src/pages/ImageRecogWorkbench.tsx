@@ -222,7 +222,7 @@ function Stage1() {
       <div className="card">
         <h2 className="font-semibold text-gray-700 mb-3">选择或输入你想研究的问题</h2>
         <div className="grid gap-2 mb-3">{templates.map((t) => (
-          <button key={t} onClick={() => handleSelectQuestion(t)} className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedQ === t ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}>{t}</button>
+          <button key={t} onClick={() => handleSelectQuestion(t)} className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedQ === t ? "bg-gray-900 text-white" : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-100"}`}>{t}</button>
         ))}</div>
         <textarea className="w-full min-h-[60px] p-3 border rounded-lg text-sm resize-y" placeholder="或用你自己的话描述..." value={store.rawQuestion} onChange={e => store.set({ rawQuestion: e.target.value })} />
         <button className="btn-primary mt-3" onClick={handleSuggest} disabled={loading || !store.rawQuestion.trim()}>{loading ? "生成中..." : "AI 帮我转化"}</button>
@@ -478,7 +478,7 @@ function Stage5() {
           </button>
         </div>
         {result && store.numTrials > 1 && (
-          <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100"><span className="text-xs text-gray-500 font-medium">切换组别：</span>{Array.from({ length: store.numTrials }, (_, i) => i + 1).map(t => <button key={t} onClick={() => store.set({ selectedTrial: t })} className={`px-3 py-1 rounded-full text-xs font-medium ${store.selectedTrial === t ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-500"}`}>第{t}组</button>)}</div>)}
+          <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100"><span className="text-xs text-gray-500 font-medium">切换组别：</span>{Array.from({ length: store.numTrials }, (_, i) => i + 1).map(t => <button key={t} onClick={() => store.set({ selectedTrial: t })} className={`px-3 py-1 rounded-full text-xs font-medium ${store.selectedTrial === t ? "bg-gray-900 text-white" : "bg-white text-gray-500 border border-gray-200"}`}>第{t}组</button>)}</div>)}
       </div>
 
       {/* ── 训练阶段 ── */}
@@ -557,7 +557,7 @@ function Stage5() {
               <div key={r.algorithm} className="card">
                 <div className="flex items-center justify-between"><span className="font-semibold text-sm">{nameOf(r.algorithm)}</span><span className="text-sm font-bold text-green-600">✓ 准确率 {(r.accuracy * 100).toFixed(1)}%</span></div>
                 <p className="text-xs text-gray-400 mt-1">{r.correct}/{r.total} 正确 · {r.runtime_ms}ms</p>
-                {r.params_used && Object.keys(r.params_used).length > 0 && <div className="flex gap-1 mt-1 flex-wrap">{Object.entries(r.params_used).map(([k, v]) => <span key={k} className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">{k}={String(v)}</span>)}</div>}
+                {r.params_used && Object.keys(r.params_used).length > 0 && <div className="flex gap-1 mt-1 flex-wrap">{Object.entries(r.params_used).map(([k, v]) => <span key={k} className="text-[10px] bg-white text-gray-500 border border-gray-200 px-1.5 py-0.5 rounded">{k}={String(v)}</span>)}</div>}
               </div>
             ))}
           </div>

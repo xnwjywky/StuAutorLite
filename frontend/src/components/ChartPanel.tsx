@@ -2,7 +2,8 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 
 type ChartData = Record<string, any>;
 
-const COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"];
+// DeepSeek 平台图表色板（蓝/绿/琥珀/红，见 platform.deepseek.com 静态色阶）
+const COLORS = ["#3964fe", "#22c55e", "#f7ad31", "#f25a5a", "#60a5fa", "#b7c8fe"];
 
 interface ChartPanelProps {
   data?: ChartData[];
@@ -25,8 +26,8 @@ export default function ChartPanel({ data: rawData, xKey = "algorithm", singleMe
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
             <XAxis dataKey={xKey} tick={{ fontSize: 11 }} />
             <YAxis tick={{ fontSize: 10 }} type="number" domain={[(dataMin: number) => Math.min(0, dataMin), (dataMax: number) => Math.max(0, dataMax)]} />
-            <Tooltip />
-            <Bar dataKey={singleMetric.key} name={singleMetric.label} fill="#3b82f6" radius={[3, 3, 0, 0]}>
+            <Tooltip contentStyle={{ backgroundColor: "var(--app-card-bg)", borderColor: "var(--app-divider)", color: "var(--app-text)", borderRadius: 8, fontSize: 12 }} />
+            <Bar dataKey={singleMetric.key} name={singleMetric.label} fill="#3964fe" radius={[3, 3, 0, 0]}>
               {data.map((_: any, i: number) => (
                 <Cell key={i} fill={COLORS[i % COLORS.length]} />
               ))}
@@ -38,9 +39,9 @@ export default function ChartPanel({ data: rawData, xKey = "algorithm", singleMe
   }
 
   const BARS = bars ?? [
-    { key: "expanded_nodes", name: "搜索节点数", color: "#3b82f6" },
+    { key: "expanded_nodes", name: "搜索节点数", color: "#3964fe" },
     { key: "path_length", name: "路径长度", color: "#22c55e" },
-    { key: "runtime_ms", name: "运行时间 (ms)", color: "#f59e0b" },
+    { key: "runtime_ms", name: "运行时间 (ms)", color: "#f7ad31" },
   ];
 
   return (

@@ -44,7 +44,7 @@ export default function QuestionForm() {
           <div className="grid gap-2">
             {TEMPLATES.map((t) => (
               <button key={t} onClick={() => setInterest(t)}
-                className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${interest === t ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}>{t}</button>
+                className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${interest === t ? "bg-gray-900 text-white" : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-100"}`}>{t}</button>
             ))}
           </div>
         </div>

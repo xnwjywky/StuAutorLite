@@ -4,34 +4,78 @@
 
 @layer base {
   :root {
-    /* 默认主题：米白 #f5ecd0；分界线黑色（米色背景下更清晰） */
+    /* 默认主题：米黄 #f5ecd0 —— 按页面配置协调的暖色搭配。
+       只协调「背景填充」与「分割线」两类：浅色填充色阶（--app-gray-50/100/200）
+       用暖色变量（RGB 三元组，供 rgb(var() / <alpha-value>) 使用）；
+       卡片保持纯白、正文与深色 UI 保持中性灰，不做全量改色。 */
     --app-bg: #f5ecd0;
     --app-navbar-bg: rgba(245, 236, 208, 0.9);
-    --app-divider: #000000;
+    /* 分割线：暖色调浅卡其（替代纯黑，柔和且与米黄协调） */
+    --app-divider: #d2c49c;
+    --app-gray-50: 250 244 226; /* 极浅暖象牙：未选中项 / 浅色填充 */
+    --app-gray-100: 242 232 202; /* 浅暖沙色：悬停 / 进度条轨道 */
+    --app-gray-200: 227 213 171; /* 暖沙色发丝线 / 次级填充 */
+    /* 语义色：正文 / 次级文本 / 卡片底与边框 */
+    --app-text: #111827;
+    --app-card-bg: #ffffff;
   }
   :root[data-theme="light"] {
-    /* 纯白主题 */
+    /* 纯白主题：保持 Tailwind 默认 */
     --app-bg: #ffffff;
     --app-navbar-bg: rgba(255, 255, 255, 0.9);
     --app-divider: #e5e7eb;
+    --app-gray-50: 249 250 251;
+    --app-gray-100: 243 244 246;
+    --app-gray-200: 229 231 235;
+    --app-text: #111827;
+    --app-card-bg: #ffffff;
+  }
+  :root[data-theme="gray"] {
+    /* DeepSeek 平台浅色主题（platform.deepseek.com 提取）：
+       页面背景 bluish-60 #f5f6f7（白卡片上的浅灰底），发丝线 bluish-150 #e9ecf2 */
+    --app-bg: #f5f6f7;
+    --app-navbar-bg: rgba(245, 246, 247, 0.9);
+    --app-divider: #e9ecf2;
+    --app-gray-50: 245 246 247; /* bluish-60：未选中项 / 浅填充 */
+    --app-gray-100: 241 243 245; /* bluish-75：悬停 / 进度条轨道 */
+    --app-gray-200: 233 236 242; /* bluish-150：发丝线 */
+    --app-text: #111827;
+    --app-card-bg: #ffffff;
+  }
+  /* 无显式 border-color 的分隔线（border-b / border-t / border-r 等）
+     默认是 currentColor（近黑色），在米黄背景上过于生硬；
+     统一改为主题分割线色。显式 border-gray-200 等颜色类不受影响。 */
+  *,
+  ::before,
+  ::after {
+    border-color: var(--app-divider);
   }
   body {
-    @apply antialiased text-gray-900;
+    @apply antialiased;
+    color: var(--app-text);
     background-color: var(--app-bg);
   }
 }
 
 @layer components {
   .btn-primary {
-    @apply bg-primary-500 text-white px-4 py-2 rounded-lg hover:bg-primary-600
+    @apply bg-primary-500 text-white px-4 py-2 rounded-lg
            transition-colors disabled:opacity-50 disabled:cursor-not-allowed
            text-sm font-medium;
   }
+  .btn-primary:hover:not(:disabled):not([disabled]) {
+    /* DeepSeek 主按钮 hover：deepseek-450，hover 变浅（非标准色阶 450 不走 @apply，避免 dev 下解析失败） */
+    background-color: #5686fe;
+  }
   .btn-secondary {
-    @apply bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300
-           transition-colors text-sm font-medium;
+    /* 次级按钮：主题卡片底 + 灰阶描边，与页面填充和卡片都区分开 */
+    @apply text-gray-700 px-4 py-2 rounded-lg border border-gray-200
+           hover:bg-gray-100 transition-colors text-sm font-medium;
+    background-color: var(--app-card-bg);
   }
   .card {
-    @apply bg-white rounded-xl shadow-sm border border-gray-100 p-6;
+    @apply rounded-xl shadow-sm border p-6;
+    background-color: var(--app-card-bg);
+    border-color: rgb(var(--app-gray-100));
   }
 }

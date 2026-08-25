@@ -142,7 +142,7 @@ export default function AgentConfigPage() {
                   {AGENT_NAMES.map((name) => (
                     <button key={name} onClick={() => toggleAgent(name)}
                       className={`px-2.5 py-1 rounded-full text-xs transition-colors ${
-                        form.agentNames.includes(name) ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                        form.agentNames.includes(name) ? "bg-gray-900 text-white" : "bg-white text-gray-500 border border-gray-200 hover:bg-gray-100"
                       }`}>
                       {AGENT_LABELS[name]}
                     </button>
@@ -189,7 +189,7 @@ export default function AgentConfigPage() {
                         {isActive ? "使用中" : "未启用"}
                       </button>
                       <h3 className="font-semibold text-gray-800 text-sm">{cfg.label}</h3>
-                      <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                      <span className="text-[10px] bg-white text-gray-500 border border-gray-200 px-2 py-0.5 rounded-full">
                         {cfg.agentNames.length > 0 ? cfg.agentNames.map((n) => AGENT_LABELS[n] || n).join("、") : "全部 Agent 共用"}
                       </span>
                     </div>
