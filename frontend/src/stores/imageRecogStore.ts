@@ -1,6 +1,7 @@
 /** 统一图像识别实验状态 — 图形识别 + 手写数字识别 */
 import { create } from "zustand";
 import type { ResearchStage } from "../types";
+import type { ReflectionQuestion } from "../api/service";
 
 export type ImageRecogExperimentType = "shape" | "digits" | "mnist";
 
@@ -41,7 +42,7 @@ export interface ImageRecogWorkflowData {
   studentAnalysis: string;
   aiAnalysis: { summary: string; key_findings: string[]; questions_for_student: string[] } | null;
   reflectionAnswers: Record<number, string>;
-  reflectionQuestions: string[];
+  reflectionQuestions: ReflectionQuestion[];
   reportMarkdown: string;
 }
 

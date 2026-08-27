@@ -1,6 +1,7 @@
 /** 图像分类实验状态 — 镜像 workflowStore.ts 模式 */
 import { create } from "zustand";
 import type { ClassifierType, ClassifyMetricType, DataPattern, ResearchStage } from "../types";
+import type { ReflectionQuestion } from "../api/service";
 
 export interface ClassifyWorkflowData {
   sessionId: number | null;
@@ -44,7 +45,7 @@ export interface ClassifyWorkflowData {
 
   // Stage 7 — 反思改进
   reflectionAnswers: Record<number, string>;
-  reflectionQuestions: string[];
+  reflectionQuestions: ReflectionQuestion[];
 
   // Stage 8 — 研究报告
   reportMarkdown: string;

@@ -1,6 +1,7 @@
 /** MNIST 手写数字识别实验状态 */
 import { create } from "zustand";
 import type { ResearchStage } from "../types";
+import type { ReflectionQuestion } from "../api/service";
 
 export interface MNISTWorkflowData {
   sessionId: number | null;
@@ -49,7 +50,7 @@ export interface MNISTWorkflowData {
   // 分析 + 反思 + 报告
   studentAnalysis: string;
   reflectionAnswers: Record<number, string>;
-  reflectionQuestions: string[];
+  reflectionQuestions: ReflectionQuestion[];
   aiAnalysis: { summary: string; key_findings: string[]; questions_for_student: string[] } | null;
   reportMarkdown: string;
 

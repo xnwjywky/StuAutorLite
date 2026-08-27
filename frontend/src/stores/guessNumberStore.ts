@@ -1,6 +1,7 @@
 /** 猜数字策略实验状态 — 聚焦算法学习 */
 import { create } from "zustand";
 import type { GuessStrategyType, ResearchStage } from "../types";
+import type { ReflectionQuestion } from "../api/service";
 
 export interface GuessWorkflowData {
   sessionId: number | null;
@@ -31,7 +32,7 @@ export interface GuessWorkflowData {
 
   // Stage 7 — 反思改进
   reflectionAnswers: Record<number, string>;
-  reflectionQuestions: string[];
+  reflectionQuestions: ReflectionQuestion[];
 
   // Stage 8 — 总结
   reportMarkdown: string;

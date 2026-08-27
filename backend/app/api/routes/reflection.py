@@ -54,9 +54,22 @@ def _resolve_pools(config: dict, mode: str | None) -> tuple[dict, dict]:
 @router.post("/generate")
 def generate_questions(req: ReflectionQuestionCreate, db: DbSession = Depends(get_db)):
     """生成反思问题：4 道实验独有 + 1 道通用（放最后），写入 DB。
-    问题与模板回答按实验定制（task_id 显式传入优先，可带 :mode 区分子实验）。"""
+    问题与模板回答按实验定制（task_id 显式传入优先，可带 :mode 区分子实验）。
+    非确定性选题，并排除上一批已选题 → 点“换一组问题”能显示新题。"""
     config, mode, storage_key = _config_for_session(db, req.session_id, getattr(req, "task_id", None))
     questions_pool, templates = _resolve_pools(config, mode)
+
+    # 先记录当前已选题（同过滤条件），用于换题时排除，避免刷出新一批还是老题
+    prev_by_cat = {
+        q.category: q.question_text for q in db.query(ReflectionQuestion).filter(
+            ReflectionQuestion.session_id == req.session_id,
+            or_(
+                ReflectionQuestion.task_id == storage_key,
+                ReflectionQuestion.task_id == "",
+                ReflectionQuestion.task_id.is_(None),
+            ),
+        ).all()
+    }
 
     # 只清理本实验（同 storage_key）的旧题，避免误删同一 demo 会话下其他实验的问题
     db.query(ReflectionQuestion).filter(
@@ -68,22 +81,23 @@ def generate_questions(req: ReflectionQuestionCreate, db: DbSession = Depends(ge
         ),
     ).delete(synchronize_session=False)
 
-    rng = random.Random(req.session_id)
     to_write: list[tuple[str, str, list]] = []
 
-    # 1) 实验独有问题：4 类各抽 1 题
+    def _pick(cat: str, pool: list) -> str:
+        rest = [q for q in pool if q != prev_by_cat.get(cat)]
+        return random.choice(rest or pool)
+
+    # 1) 实验独有问题：4 类各抽 1 题（换题时避开上一批同类已选，保证出新题）
     for cat in UNIQUE_CATEGORIES:
         pool = questions_pool.get(cat) or []
         if not pool:
             continue
-        q = rng.sample(pool, min(1, len(pool)))[0]
-        to_write.append((cat, q, templates.get(cat, [])))
+        to_write.append((cat, _pick(cat, pool), templates.get(cat, [])))
 
     # 2) 通用问题：1 题放最后（不要太多）
     common_pool = COMMON_QUESTIONS.get(COMMON_CATEGORY, [])
     if common_pool:
-        q = rng.sample(common_pool, min(1, len(common_pool)))[0]
-        to_write.append((COMMON_CATEGORY, q, COMMON_TEMPLATES.get(COMMON_CATEGORY, [])))
+        to_write.append((COMMON_CATEGORY, _pick(COMMON_CATEGORY, common_pool), COMMON_TEMPLATES.get(COMMON_CATEGORY, [])))
 
     created: list[ReflectionQuestion] = []
     for order, (cat, q, tpls) in enumerate(to_write):

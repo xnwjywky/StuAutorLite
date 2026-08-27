@@ -1,6 +1,7 @@
 /** 可视化算法比较实验状态 — 排序 + 字符串搜索 */
 import { create } from "zustand";
 import type { SortingAlgorithmType, StringSearchAlgorithmType, ResearchStage } from "../types";
+import type { ReflectionQuestion } from "../api/service";
 
 export interface AlgoCompareWorkflowData {
   sessionId: number | null; taskId: string; currentStage: ResearchStage;
@@ -17,7 +18,7 @@ export interface AlgoCompareWorkflowData {
   selectedTrial: number;
   studentAnalysis: string; aiAnalysis: { summary: string; key_findings: string[]; questions_for_student: string[] } | null;
   reflectionAnswers: Record<number, string>;
-  reflectionQuestions: string[];
+  reflectionQuestions: ReflectionQuestion[];
   reportMarkdown: string;
 }
 

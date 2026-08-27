@@ -1,6 +1,7 @@
 /** 手写数字识别实验状态 */
 import { create } from "zustand";
 import type { DigitRecogAlgorithmType, ResearchStage } from "../types";
+import type { ReflectionQuestion } from "../api/service";
 
 export interface DigitsWorkflowData {
   sessionId: number | null; taskId: string; currentStage: ResearchStage;
@@ -13,7 +14,7 @@ export interface DigitsWorkflowData {
   selectedTrial: number;
   studentAnalysis: string; aiAnalysis: { summary: string; key_findings: string[]; questions_for_student: string[] } | null;
   reflectionAnswers: Record<number, string>;
-  reflectionQuestions: string[];
+  reflectionQuestions: ReflectionQuestion[];
   reportMarkdown: string;
 }
 

@@ -22,6 +22,7 @@ import { archiveSession } from "./Archive";
 import { updateProfileScores } from "./ProfilePage";
 import { renderMarkdown } from "../utils/markdown";
 import type { ResearchStage, ClassifierType, ClassifyMetricType, DataPattern } from "../types";
+import { buildReflectionText } from "../utils/reflection";
 
 // ═══════════════════════════════════════════════════════════
 const STEPS: { key: ResearchStage; label: string }[] = [
@@ -554,7 +555,7 @@ function classifyFallback(input: string): string[] {
 
 function buildClassifyReport(store: ReturnType<typeof useClassificationStore.getState>): string {
   const refQs = store.reflectionQuestions.length > 0 ? store.reflectionQuestions : REFLECTION_QUESTIONS;
-  const reflectionText = refQs.map((q, i) => `**${q}**\n\n${store.reflectionAnswers[i] || "（待补充）"}`).join("\n\n");
+  const reflectionText = buildReflectionText(refQs, store.reflectionAnswers);
   const summary = store.experimentResult ? Object.entries(store.experimentResult.summary).map(([a, s]: any) => `| ${a} | ${(s.avg_accuracy * 100).toFixed(0)}% | ${(s.avg_precision * 100).toFixed(0)}% | ${(s.avg_recall * 100).toFixed(0)}% | ${(s.avg_f1 * 100).toFixed(0)}% |`).join("\n") : "| - | - | - | - | - |";
   return [`# 图像分类算法比较研究`, ``, `## 1. 研究问题`, ``, store.refinedQuestion || store.rawQuestion || "（待补充）", ``, `## 2. 我的假设`, ``, store.hypothesis || "（待补充）", ``, `## 3. 实验设计`, ``, `- 对比分类器：${store.selectedClassifiers.join("、")}`, `- 数据量：${store.nSamples} 个点`, `- 噪声水平：${(store.noiseLevels[0] * 100).toFixed(0)}%`, `- 数据分布：${store.patterns.join("、")}`, `- 重复次数：${store.numTrials} 次`, `- K 值：${store.kValue}，最大深度：${store.maxDepth === 99 ? "不限" : String(store.maxDepth)}`, ``, `## 4. 实验结果`, ``, `| 分类器 | 准确率 | 精确率 | 召回率 | F1 |`, `|---|---:|---:|---:|---:|`, summary, ``, `## 5. 结果分析`, ``, store.studentAnalysis || "（待补充）", ``, `## 6. 反思与改进`, ``, reflectionText, ``, `## 7. 总结`, ``, `（待补充）`].join("\n");
 }

@@ -5,8 +5,8 @@ import ThemeToggle from "./ThemeToggle";
 
 const NAV_ITEMS = [
   { path: "/", label: "发现" },
-  { path: "/profile", label: "科研能力画像" },
-  { path: "/archive", label: "研究档案" },
+  { path: "/profile", label: "画像" },
+  { path: "/archive", label: "档案" },
 ];
 
 interface LayoutProps {

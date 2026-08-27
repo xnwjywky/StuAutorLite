@@ -1,15 +1,19 @@
 """报告生成与审稿 — 设计文档 §11.7-11.8"""
 
 import json
+import random
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session as DbSession
 from app.models.database import (
     get_db, ResearchReport, Session as SessionModel,
     Question, Hypothesis, ExperimentDesign, ExperimentRun, AnalysisRecord,
+    ReflectionQuestion,
 )
 from app.models.schemas import ReportGenerateRequest, ReviewRequest
 from app.services.report_generator import ReportGenerator
 from app.agents.reviewer import Reviewer
+from app.api.routes.reflection_content import is_blank_answer
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 generator = ReportGenerator()
@@ -105,6 +109,30 @@ def get_report(report_id: int, db: DbSession = Depends(get_db)):
 
 
 # ── helpers ──────────────────────────────────────────────
+def _collect_reflection(session_id: int, db: DbSession) -> str:
+    """收集反思回答组成报告「反思与改进」段落。
+    回答为空白/敷衍时，用该题已有的模板答案随机填充一条，保证报告展示与审稿评分更完整。"""
+    q = db.query(ReflectionQuestion).filter(
+        ReflectionQuestion.session_id == session_id,
+        ReflectionQuestion.is_selected == 1,
+    )
+    s = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if s and s.task_id:
+        q = q.filter(or_(
+            ReflectionQuestion.task_id == s.task_id,
+            ReflectionQuestion.task_id == "",
+            ReflectionQuestion.task_id.is_(None),
+        ))
+    parts = []
+    for rq in q.order_by(ReflectionQuestion.sort_order).all():
+        ans = (rq.student_answer or "").strip()
+        if is_blank_answer(ans):
+            tpls = json.loads(rq.template_answers) if rq.template_answers else []
+            ans = random.choice([t["text"] for t in tpls]) if tpls else "（待补充）"
+        parts.append(f"**{rq.question_text}**\n\n{ans}")
+    return "\n\n".join(parts)
+
+
 def _collect_session_data(session_id: int, db: DbSession) -> dict:
     s = db.query(SessionModel).filter(SessionModel.id == session_id).first()
     q = db.query(Question).filter(Question.session_id == session_id).first()
@@ -138,7 +166,7 @@ def _collect_session_data(session_id: int, db: DbSession) -> dict:
         "metrics": json.loads(d.metrics) if d and d.metrics else [],
         "summary": summary_data,
         "student_analysis": a.student_analysis if a else "",
-        "reflection": "",
+        "reflection": _collect_reflection(session_id, db),
         "conclusion": "",
     }
 

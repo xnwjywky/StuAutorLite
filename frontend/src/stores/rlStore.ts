@@ -1,6 +1,7 @@
 /** RL gridworld experiment state */
 import { create } from "zustand";
 import type { ResearchStage } from "../types";
+import type { ReflectionQuestion } from "../api/service";
 
 export interface RLWorkflowData {
   sessionId: number | null;
@@ -41,7 +42,7 @@ export interface RLWorkflowData {
   studentAnalysis: string;
   aiAnalysis: { summary: string; key_findings: string[]; questions_for_student: string[] } | null;
   reflectionAnswers: Record<number, string>;
-  reflectionQuestions: string[];
+  reflectionQuestions: ReflectionQuestion[];
   reportMarkdown: string;
 }
 

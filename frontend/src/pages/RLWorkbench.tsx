@@ -17,6 +17,7 @@ import { detectBaseUrl } from "../api/client";
 import { archiveSession } from "./Archive";
 import { renderMarkdown } from "../utils/markdown";
 import type { ResearchStage } from "../types";
+import { buildReflectionText } from "../utils/reflection";
 
 const STEPS: { key: ResearchStage; label: string }[] = [
   { key: "TASK_SELECTED",       label: "选择研究任务" },
@@ -554,7 +555,7 @@ function Stage5() {
   if (!store.reportMarkdown) {
     const summary = result ? Object.entries(result.summary).map(([a, s]: any) => `| ${AGENT_LIST.find(x => x.key === a)?.name || a} | ${(s.avg_success_rate * 100).toFixed(0)}% | ${s.avg_reward} |`).join("\n") : "| - | - | - |";
     const refQs = store.reflectionQuestions.length > 0 ? store.reflectionQuestions : REFLECTION_FALLBACK;
-    const reflectionText = refQs.map((q, i) => `**${q}**\n\n${store.reflectionAnswers[i] || "（待补充）"}`).join("\n\n");
+    const reflectionText = buildReflectionText(refQs, store.reflectionAnswers);
     store.set({ reportMarkdown: [
       "# 强化学习格子世界 — 机器人找金币研究", "", "## 1. 研究问题", store.refinedQuestion || store.rawQuestion, "",
       "## 2. 我的假设", store.hypothesis, "", "## 3. 实验设计",

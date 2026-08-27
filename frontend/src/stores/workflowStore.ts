@@ -1,6 +1,7 @@
 /** 科研流程共享状态 — 9 阶段完整流程 */
 import { create } from "zustand";
 import type { AlgorithmType, MetricType, ResearchStage } from "../types";
+import type { ReflectionQuestion } from "../api/service";
 
 // ── 每个阶段的数据 ─────────────────────────────────────
 export interface WorkflowData {
@@ -45,7 +46,7 @@ export interface WorkflowData {
 
   // Stage 7 — 反思改进
   reflectionAnswers: Record<number, string>;
-  reflectionQuestions: string[];
+  reflectionQuestions: ReflectionQuestion[];
 
   // Stage 8 — 研究报告
   reportMarkdown: string;

@@ -17,6 +17,7 @@ import { detectBaseUrl } from "../api/client";
 import { archiveSession } from "./Archive";
 import { renderMarkdown } from "../utils/markdown";
 import type { ResearchStage } from "../types";
+import { buildReflectionEntries } from "../utils/reflection";
 
 const STEPS: { key: ResearchStage; label: string }[] = [
   { key: "TASK_SELECTED",        label: "选择研究任务" },
@@ -994,7 +995,9 @@ function Stage6() {
         `- 网络架构: ${archName} (${store.selectedArchitecture})`, `- 学习率: ${hp.learningRate}  |  批次大小: ${hp.batchSize}  |  训练轮数: ${hp.epochs}`, `- 优化器: ${hp.optimizer}  |  Momentum: ${hp.momentum}  |  Dropout: ${hp.dropout}`, "",
         "## 4. 实验结果", result ? [`| 指标 | 值 |`, `|---|---|`, `| 最终训练准确率 | ${(result.summary.final_train_accuracy * 100).toFixed(1)}% |`, `| 最终测试准确率 | ${(result.summary.final_test_accuracy * 100).toFixed(1)}% |`, `| 最佳测试准确率 | ${(result.summary.best_val_accuracy * 100).toFixed(1)}% (第${result.summary.best_epoch}轮) |`, `| 训练时间 | ${result.summary.training_time}秒 |`, `| 过拟合程度 | ${(result.summary.overfitting_score * 100).toFixed(1)}% |`].join("\n") : "暂无数据", "",
         "## 5. 我的分析", store.studentAnalysis, "", "## 6. 反思与改进",
-        ...refQs.map((q, i) => `- **${q}**\n  ${store.reflectionAnswers[i] || "(未回答)"}\n`), "## 7. 总结",
+        ...buildReflectionEntries(refQs, store.reflectionAnswers, "（未回答）").map(({ q, a }) => `- **${q}**
+  ${a}
+`), "## 7. 总结",
       ].join("\n") });
   }
   return (

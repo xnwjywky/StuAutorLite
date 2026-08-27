@@ -26,6 +26,7 @@ import { archiveSession } from "./Archive";
 import { renderMarkdown } from "../utils/markdown";
 import { updateProfileScores } from "./ProfilePage";
 import type { ResearchStage, AlgorithmType, MetricType } from "../types";
+import { buildReflectionText } from "../utils/reflection";
 
 // ═══════════════════════════════════════════════════════════
 const STEPS: { key: ResearchStage; label: string }[] = [
@@ -745,7 +746,7 @@ function suggestFallback(input: string): string[] {
 function pickAlgo(s: string): string { for (const a of ["A*","BFS","DFS","Random"]) if (s.includes(a)) return a; return "A*"; }
 function buildReportMd(store: ReturnType<typeof useWorkflowStore.getState>): string {
   const refQs = store.reflectionQuestions.length > 0 ? store.reflectionQuestions : REFLECTION_QUESTIONS;
-  const reflectionText = refQs.map((q, i) => `**${q}**\n\n${store.reflectionAnswers[i] || "（待补充）"}`).join("\n\n");
+  const reflectionText = buildReflectionText(refQs, store.reflectionAnswers);
   const algoSummary = store.experimentResult ? Object.entries(store.experimentResult.summary).map(([a, s]: any) => `| ${a} | ${(s.success_rate * 100).toFixed(0)}% | ${s.avg_path_length ?? "-"} | ${s.avg_expanded_nodes} | ${s.avg_runtime_ms}ms |`).join("\n") : "| - | - | - | - | - |";
   return [`# 迷宫寻路算法比较研究`, ``, `## 1. 研究问题`, ``, store.refinedQuestion || store.rawQuestion || "（待补充）", ``, `## 2. 我的假设`, ``, store.hypothesis || "（待补充）", ``, `## 3. 实验设计`, ``, `- 对比算法：${store.selectedAlgorithms.join("、")}`, `- 迷宫大小：${store.mazeSize[0]}×${store.mazeSize[1]}`, `- 障碍物比例：${store.obstacleRatios.map((r) => (r * 100).toFixed(0) + "%").join("、")}`, `- 每组重复：${store.numTrials} 次`, `- 评价指标：${store.selectedMetrics.join("、")}`, ``, `## 4. 实验结果`, ``, `| 算法 | 成功率 | 平均路径长度 | 平均搜索节点 | 平均运行时间 |`, `|---|---:|---:|---:|---:|`, algoSummary, ``, `## 5. 结果分析`, ``, store.studentAnalysis || "（待补充）", ``, `## 6. 反思与改进`, ``, reflectionText, ``, `## 7. 总结`, ``, `（待补充）`].join("\n");
 }

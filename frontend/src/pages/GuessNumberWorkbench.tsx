@@ -18,6 +18,7 @@ import {
 import { archiveSession } from "./Archive";
 import { renderMarkdown } from "../utils/markdown";
 import type { ResearchStage, GuessStrategyType } from "../types";
+import { buildReflectionText } from "../utils/reflection";
 
 // ═══════════════════════════════════════════════════════════
 const STEPS: { key: ResearchStage; label: string }[] = [
@@ -451,7 +452,7 @@ function Stage7() {
 function buildReport(store: ReturnType<typeof useGuessNumberStore.getState>): string {
   const summary = store.experimentResult ? Object.entries(store.experimentResult.summary).map(([a, s]: any) => `| ${a === "BINARY" ? "二分查找" : a === "RANDOM" ? "随机猜测" : "线性扫描"} | ${s.avg_guesses} | ${s.min_guesses} | ${s.max_guesses} | ${(s.success_rate * 100).toFixed(0)}% |`).join("\n") : "| - | - | - | - | - |";
   const refQs = store.reflectionQuestions.length > 0 ? store.reflectionQuestions : REFLECTION_FALLBACK;
-  const reflectionText = refQs.map((q, i) => `**${q}**\n\n${store.reflectionAnswers[i] || "（待补充）"}`).join("\n\n");
+  const reflectionText = buildReflectionText(refQs, store.reflectionAnswers);
   return [`# 猜数字策略比较研究`, ``, `## 1. 研究问题`, store.refinedQuestion || store.rawQuestion, ``, `## 2. 我的假设`, store.hypothesis, ``, `## 3. 实验设计`, `- 对比策略：${store.selectedStrategies.join("、")}`, `- 数字范围：${store.numberLow}-${store.numberHigh}`, `- 重复次数：${store.numTrials}`, ``, `## 4. 实验结果`, `| 策略 | 平均次数 | 最少次数 | 最多次数 | 成功率 |`, `|---|---:|---:|---:|---:|`, summary, ``, `## 5. 我的分析 & 学到的知识`, store.studentAnalysis, ``, `## 6. 反思与改进`, reflectionText, ``, `## 7. 总结`].join("\n");
 }
 

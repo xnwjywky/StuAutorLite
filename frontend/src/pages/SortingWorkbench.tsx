@@ -16,6 +16,7 @@ import { runSortingExperiment, runStringSearchExperiment, saveQuestion, saveAnal
 import { archiveSession } from "./Archive";
 import { renderMarkdown } from "../utils/markdown";
 import type { ResearchStage, SortingAlgorithmType, StringSearchAlgorithmType } from "../types";
+import { buildReflectionText } from "../utils/reflection";
 
 const STEPS: { key: ResearchStage; label: string }[] = [
   { key: "TASK_SELECTED",       label: "选择研究任务" },
@@ -331,7 +332,7 @@ function buildReport(store: ReturnType<typeof useAlgoCompareStore.getState>): st
   let summary = store.experimentResult ? Object.entries(store.experimentResult.summary).map(([a,s]:any)=>`| ${algoList.find(x=>x.key===a)?.name||a} | ${isSort ? s.avg_comparisons : s.avg_comparisons} | ${s.avg_runtime_ms}ms |`).join("\n") : "| - | - | - |";
   const fallbackQs = isSort ? SORT_REFLECTION_FALLBACK : SEARCH_REFLECTION_FALLBACK;
   const refQs = store.reflectionQuestions.length > 0 ? store.reflectionQuestions : fallbackQs;
-  const reflectionText = refQs.map((q, i) => `**${q}**\n\n${store.reflectionAnswers[i] || "（待补充）"}`).join("\n\n");
+  const reflectionText = buildReflectionText(refQs, store.reflectionAnswers);
   return [`# ${isSort?"排序":"字符串搜索"}算法比较研究`,``,`## 1. 研究问题`,store.refinedQuestion||store.rawQuestion,``,`## 2. 我的假设`,store.hypothesis,``,`## 3. 实验设计`,`- 对比算法：${selected.join("、")}`,`- 实验参数：${isSort?`数组=${store.arraySize}, 分布=${store.dataPattern}`:`文本=${store.textLength}字符, 模式串=${store.patternLength}字符`}`,`- 重复次数：${store.numTrials}`,``,`## 4. 实验结果`,`| 算法 | 操作次数 | 平均耗时 |`,`|---|---:|---:|`,summary,``,`## 5. 结果分析`,store.studentAnalysis,``,`## 6. 反思与改进`,reflectionText,``,`## 7. 总结`].join("\n");
 }
 

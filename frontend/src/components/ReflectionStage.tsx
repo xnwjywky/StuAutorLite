@@ -22,8 +22,8 @@ interface ReflectionStageProps {
   onChange: (answers: Record<number, string>) => void;
   /** 离线/后端不可用时的本地降级问题（需与实验强相关） */
   fallbackQuestions?: string[];
-  /** 载入问题文本，供报告生成引用（数组顺序 = 问题顺序） */
-  onQuestions?: (qs: string[]) => void;
+  /** 载入完整问题对象（含模板答案），供报告生成引用（数组顺序 = 问题顺序） */
+  onQuestions?: (qs: ReflectionQuestion[]) => void;
   onBack: () => void;
   onNext: () => void;
   step?: number;
@@ -63,7 +63,7 @@ export default function ReflectionStage({
       student_answer: reflectionAnswers[i] || "", ai_feedback: "", template_answers: [], created_at: "",
     }));
     setQuestions(fqs);
-    onQuestionsRef.current?.(texts);
+    onQuestionsRef.current?.(fqs);
     const fa: Record<number, string> = {};
     fqs.forEach((q, i) => { fa[q.id] = reflectionAnswers[i] || ""; });
     setRealAnswers(fa);
@@ -79,7 +79,7 @@ export default function ReflectionStage({
       }
       if (qs && qs.length > 0) {
         setQuestions(qs);
-        onQuestionsRef.current?.(qs.map((q) => q.question_text));
+        onQuestionsRef.current?.(qs);
         const am: Record<number, string> = {};
         for (const q of qs) { if (q.student_answer) am[q.id] = q.student_answer; }
         setRealAnswers(am);
@@ -115,8 +115,9 @@ export default function ReflectionStage({
       const generated = await generateReflectionQuestions(sessionId, taskId);
       if (generated.questions?.length > 0) {
         setQuestions(generated.questions);
-        onQuestionsRef.current?.(generated.questions.map((q) => q.question_text));
+        onQuestionsRef.current?.(generated.questions);
         setRealAnswers({});
+        onChange({}); // 清空 store 中旧索引回答，避免新题错配旧答案
       } else {
         useFallback();
       }

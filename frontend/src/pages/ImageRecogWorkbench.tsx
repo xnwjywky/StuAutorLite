@@ -19,6 +19,7 @@ import { runImageRecogStream, saveQuestion, saveAnalysis, callMentor, callDataAn
 import { archiveSession } from "./Archive";
 import { renderMarkdown } from "../utils/markdown";
 import type { ResearchStage } from "../types";
+import { buildReflectionText } from "../utils/reflection";
 
 const STEPS: { key: ResearchStage; label: string }[] = [
   { key: "TASK_SELECTED",       label: "选择研究任务" },
@@ -615,6 +616,6 @@ function buildReport(store: ReturnType<typeof useImageRecogStore.getState>): str
   const summary = store.experimentResult ? Object.entries(store.experimentResult.summary).map(([a, s]: any) => `| ${algoList.find(x => x.key === a)?.name || a} | ${(s.avg_accuracy * 100).toFixed(1)}% | ${s.avg_runtime_ms}ms |`).join("\n") : "| - | - | - |";
   const fallbackQs = isShape ? SHAPE_REFLECTION_FALLBACK : DIGIT_REFLECTION_FALLBACK;
   const refQs = store.reflectionQuestions.length > 0 ? store.reflectionQuestions : fallbackQs;
-  const reflectionText = refQs.map((q, i) => `**${q}**\n\n${store.reflectionAnswers[i] || "（待补充）"}`).join("\n\n");
+  const reflectionText = buildReflectionText(refQs, store.reflectionAnswers);
   return [`# ${isShape ? "图形" : "手写数字"}识别算法比较研究`, "", `## 1. 研究问题`, store.refinedQuestion || store.rawQuestion, "", `## 2. 实验设计`, `- 对比算法：${store.selectedAlgos.join("、")}`, `- 数据量：${store.nSamples}`, `- 噪声水平：${(store.noiseLevel * 100).toFixed(0)}%`, `- 重复次数：${store.numTrials}`, "", `## 3. 实验结果`, `| 算法 | 平均准确率 | 平均耗时 |`, `|---|---:|---:|`, summary, "", `## 4. 结果分析`, store.studentAnalysis, "", `## 5. 反思与改进`, reflectionText, "", `## 6. 总结`].join("\n");
 }
