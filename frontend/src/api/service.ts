@@ -13,18 +13,6 @@ export async function createSession(taskId = "maze_pathfinding"): Promise<Resear
   return resp;
 }
 
-export async function getSession(sessionId: number): Promise<ResearchSession> {
-  return apiClient.get(`/api/research/sessions/${sessionId}`) as Promise<ResearchSession>;
-}
-
-export async function updateStage(sessionId: number, stage: string): Promise<{ current_stage: string }> {
-  return apiClient.put(`/api/research/sessions/${sessionId}/stage?stage=${stage}`) as Promise<{ current_stage: string }>;
-}
-
-export async function getStages(sessionId: number): Promise<{ current_stage: string; stages: { key: string; label: string }[] }> {
-  return apiClient.get(`/api/research/sessions/${sessionId}/stages`) as Promise<any>;
-}
-
 // ── 研究问题 ────────────────────────────────────────────
 export async function suggestQuestions(sessionId: number, interest: string): Promise<{ suggested_questions: string[] }> {
   return apiClient.post("/api/research/questions/suggest", {
@@ -211,10 +199,6 @@ export async function runClassificationExperiment(data: {
   return apiClient.post("/api/classify/run", data, { timeout: 600000 }) as Promise<any>;
 }
 
-export async function listClassificationRuns(sessionId?: number): Promise<any[]> {
-  return apiClient.get(`/api/classify/runs${sessionId ? `?session_id=${sessionId}` : ""}`) as Promise<any[]>;
-}
-
 // ── 猜数字实验 ──────────────────────────────────────────
 export async function runGuessExperiment(data: {
   session_id: number; strategies: string[]; settings: Record<string, unknown>;
@@ -251,15 +235,6 @@ export async function runDigitsExperiment(data: {
 }
 
 // ── MNIST 手写数字识别实验 ────────────────────────────────────
-export async function getMNISTArchitectures(): Promise<{ architectures: any[] }> {
-  return apiClient.get("/api/mnist/architectures") as Promise<{ architectures: any[] }>;
-}
-
-/** 预检 MNIST 依赖是否就绪 */
-export async function checkMNISTDeps(): Promise<{ deps_ok: boolean; error: string | null; python: string }> {
-  return apiClient.get("/api/mnist/check") as Promise<{ deps_ok: boolean; error: string | null; python: string }>;
-}
-
 /** MNIST 数据准备状态（MNIST_DOWNLOAD_NONBLOCKING：下载在后台，前端据此展示横幅） */
 export async function getMnistDataStatus(): Promise<{
   ready: boolean; downloading: boolean; error: string | null;

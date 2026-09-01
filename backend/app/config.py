@@ -1,6 +1,14 @@
 """应用配置"""
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
+
+# P2：数据/模型/日志路径统一锚定到 backend/ 目录（不再相对 CWD）。
+# 无论从哪个目录启动 uvicorn / pytest，都能定位到同一份数据与日志。
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = BACKEND_DIR / "data"
+LOG_DIR = BACKEND_DIR / "logs"
 
 
 class Settings(BaseSettings):
@@ -28,8 +36,8 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.openai.com/v1"
     llm_model: str = "gpt-4o"
 
-    # 数据库
-    database_url: str = "sqlite:///./data/stuautor.db"
+    # 数据库（P2：默认锚定 backend/data/stuautor.db，支持环境变量覆盖）
+    database_url: str = f"sqlite:///{DATA_DIR.as_posix()}/stuautor.db"
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

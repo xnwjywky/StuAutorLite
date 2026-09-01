@@ -12,7 +12,8 @@ import AlgorithmCard from "../components/AlgorithmCard";
 import ReflectionStage from "../components/ReflectionStage";
 import RLGridVisualizer, { ComparePath } from "../components/RLGridVisualizer";
 import { useRLStore } from "../stores/rlStore";
-import { callMentor, callDataAnalyst, saveAnalysis, hasAgentConfig, logAgentError } from "../api/service";
+import { callMentor, callDataAnalyst, saveAnalysis } from "../api/service";
+import { callAgent } from "../utils/agent";
 import { detectBaseUrl } from "../api/client";
 import { archiveSession } from "./Archive";
 import { renderMarkdown } from "../utils/markdown";
@@ -68,23 +69,6 @@ const LEARNING_RATES = [0.01, 0.1, 0.3];
 const DISCOUNTS = [0.5, 0.9, 0.99];
 const EPSILONS = [0.01, 0.1, 0.3];
 const TRIALS = [1, 3, 5];
-
-type AgentResult<T> = { ok: true; data: T } | { ok: false; error: string; agentName: string };
-
-const _agentInFlight = new Set<string>();
-
-async function callAgent(agentName: string, stage: string, fn: () => Promise<{ result?: unknown } | null>): Promise<AgentResult<unknown>> {
-  if (!hasAgentConfig()) return { ok: false, error: "未配置 Agent", agentName };
-  const _key = `${agentName}:${stage}`;
-  if (_agentInFlight.has(_key)) {
-    return { ok: false, error: "该 Agent 正在处理中，请稍候", agentName };
-  }
-  _agentInFlight.add(_key);
-  try { const resp = await fn(); const result = resp?.result as Record<string, unknown> | undefined; if (result?.error) { logAgentError(agentName, stage, String(result.error)); return { ok: false, error: String(result.error), agentName }; } if (result && Object.keys(result).length > 0) return { ok: true, data: result }; return { ok: false, error: `${agentName} 返回空结果`, agentName }; }
-  catch (e: any) { logAgentError(agentName, stage, e?.message || String(e)); return { ok: false, error: e?.message || String(e), agentName }; } finally {
-    _agentInFlight.delete(_key);
-  }
-}
 
 // ═══════════════════════════════════════════════════════════
 export default function RLWorkbench() {
@@ -341,8 +325,9 @@ function DualPathPanel({ world, comparePaths, runs, trial, nameOf }: {
   const α = store.learningRate;
   const γ = store.discount;
 
+  // 用最长路径作为动画/滑块上限（min 会让较长路径的尾部不被动画显示，两个机器人步数不一致时看起来像"提前停止"）
   const maxSteps = comparePaths.length > 0
-    ? Math.min(...comparePaths.map(cp => cp.path.length - 1))
+    ? Math.max(...comparePaths.map(cp => cp.path.length - 1))
     : 0;
 
   const [animStep, setAnimStep] = useState(0);

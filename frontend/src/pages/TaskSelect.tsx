@@ -52,8 +52,6 @@ function getRoute(taskId: string, sid: string | number): string {
     simple_classification: `/workbench-classify/${sid}`,
     guess_number:          `/workbench-guess/${sid}`,
     visual_algo_compare:   `/workbench-sort/${sid}`,
-    shape_recognition:     `/workbench-shape/${sid}`,
-    digit_recognition:     `/workbench-digits/${sid}`,
     image_recognition:     `/workbench-imagerecog/${sid}`,
     robot_obstacle:        `/workbench-rl/${sid}`,
   };
@@ -72,16 +70,23 @@ export default function TaskSelect() {
   }, [detectLocal]);
 
   const handleStart = async (taskId: string) => {
-    // 立即跳转（使用临时 sessionId），不等待后端创建会话
-    // 避免后端不可用时浏览器白等 8 秒才响应
-    navigate(getRoute(taskId, `demo-${Date.now()}`));
-
-    // 后台异步创建真实会话（静默）
+    // 先创建真实会话并拿到 sessionId，再跳转 → 实验/反思等数据正确归属该会话
+    // （此前返回的 id 被丢弃，所有数据落到了 session_id = -1 的孤儿会话）。
+    // 后端不可用或 3s 内未返回时降级 demo session（保持原有「快速进入」体验）。
     setStarting(taskId);
     try {
-      await createSession(taskId);
+      const session = await Promise.race([
+        createSession(taskId),
+        new Promise<undefined>((resolve) => setTimeout(resolve, 3000)),
+      ]);
+      const realId = session?.id;
+      const sid =
+        realId != null && Number.isFinite(Number(realId))
+          ? String(realId)
+          : `demo-${Date.now()}`;
+      navigate(getRoute(taskId, sid));
     } catch {
-      // 后端不可用 → 使用 demo session，各阶段仍可正常操作
+      navigate(getRoute(taskId, `demo-${Date.now()}`));
     } finally {
       setStarting(null);
     }

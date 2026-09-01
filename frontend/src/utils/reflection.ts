@@ -19,7 +19,8 @@ export interface ReflectionEntry {
   a: string;
 }
 
-/** 逐题解析：空白/敷衍回答 → 随机取该题模板答案；无模板（离线 fallback）→ placeholder */
+/** 逐题解析：空白/敷衍回答 → 确定性取该题模板答案（P2：不再随机，保证可复现）；
+ * 模板按 score 升序（初步/较好/优秀），取第一条完整的低分模板最贴合"空白回答"；无模板 → placeholder */
 export function buildReflectionEntries(
   refQs: (string | ReflectionQuestion)[],
   answers: Record<number, string>,
@@ -30,7 +31,7 @@ export function buildReflectionEntries(
     let a = (answers[i] || "").trim();
     if (isBlankAnswer(a)) {
       const tpls = typeof item === "string" ? [] : (item.template_answers || []);
-      a = tpls.length > 0 ? tpls[Math.floor(Math.random() * tpls.length)].text : placeholder;
+      a = tpls.length > 0 ? tpls[0].text : placeholder;
     }
     return { q, a };
   });

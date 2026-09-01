@@ -20,8 +20,9 @@ import {
   saveQuestion,
   runExperiment, analyzeResults, saveAnalysis,
   callMentor, callDataAnalyst, callReviewer, callGeneralLLM,
-  hasAgentConfig, logAgentError,
+  hasAgentConfig,
 } from "../api/service";
+import { callAgent } from "../utils/agent";
 import { archiveSession } from "./Archive";
 import { renderMarkdown } from "../utils/markdown";
 import { updateProfileScores } from "./ProfilePage";
@@ -70,45 +71,6 @@ const METRICS: { key: MetricType; label: string }[] = [
 const MAZE_SIZES = ["8×8", "12×12", "16×16", "20×20"];
 const OBSTACLE_RATIOS = [0.1, 0.2, 0.3, 0.4];
 const TRIALS = [1, 3, 5, 10];
-
-// ═══════ 通用 Agent 调用器 — 重试 + 日志 + 降级 ═══════
-type AgentCallResult<T> = { ok: true; data: T } | { ok: false; error: string; agentName: string };
-
-const _agentInFlight = new Set<string>();
-
-async function callAgent(
-  agentName: string, stage: string,
-  fn: () => Promise<{ result?: unknown } | null>,
-): Promise<AgentCallResult<unknown>> {
-  if (!hasAgentConfig()) {
-    return { ok: false, error: "未配置 Agent（请在 ⚙️ Agent 配置页面添加 API Key）", agentName };
-  }
-  const _key = `${agentName}:${stage}`;
-  if (_agentInFlight.has(_key)) {
-    return { ok: false, error: "该 Agent 正在处理中，请稍候", agentName };
-  }
-  _agentInFlight.add(_key);
-  try {
-    const resp = await fn();
-    const result = resp?.result as Record<string, unknown> | undefined;
-    // 后端返回了明确的错误信息（如 HTTP 404、API key 无效等）
-    if (result?.error) {
-      const msg = String(result.error);
-      logAgentError(agentName, stage, msg);
-      return { ok: false, error: msg, agentName };
-    }
-    if (result && Object.keys(result).length > 0) return { ok: true, data: result };
-    const err = `${agentName} 返回了空结果，已使用模板替代`;
-    logAgentError(agentName, stage, err);
-    return { ok: false, error: err, agentName };
-  } catch (e: any) {
-    const msg = `${agentName} 请求失败: ${e?.message || String(e)}`;
-    logAgentError(agentName, stage, msg);
-    return { ok: false, error: msg, agentName };
-  } finally {
-    _agentInFlight.delete(_key);
-  }
-}
 
 // ═══════════════════════════════════════════════════════════
 export default function Workbench() {
@@ -669,17 +631,8 @@ function Stage9() {
   const complete = () => {
     const scores = store.reviewResult?.scores || {};
     try { archiveSession({ sessionId: store.sessionId, taskId: store.taskId, question: store.refinedQuestion || store.rawQuestion, hypothesis: store.hypothesis, algorithms: store.selectedAlgorithms, summary: store.experimentResult?.summary || null, analysis: store.studentAnalysis, reflection: store.reflectionAnswers, report: store.reportMarkdown, review: scores }); } catch {}
-    const d: Record<string, number> = {};
-    if (store.refinedQuestion.trim()) d.question = 0.5; if ((store.hypothesis || "").trim()) d.hypothesis = 0.3;
-    if (store.selectedAlgorithms.length >= 2) d.design = 0.4; if (store.selectedAlgorithms.length >= 3) d.algorithm = 0.3;
-    if (store.studentAnalysis.trim()) d.analysis = 0.4; if (Object.values(store.reflectionAnswers).some((v) => v?.trim())) d.reflection = 0.3;
-    if ((store.reportMarkdown || "").length > 200) d.expression = 0.4;
-    const add = (k: string, v: number) => { d[k] = Math.min(5, Math.round(((d[k] || 0) + v) * 10) / 10); };
-    if (scores.question_clarity) add("question", scores.question_clarity * 0.2);
-    if (scores.experiment_design) add("design", scores.experiment_design * 0.2);
-    if (scores.analysis_depth) add("analysis", scores.analysis_depth * 0.2);
-    if (scores.reflection_quality) add("reflection", scores.reflection_quality * 0.2);
-    try { updateProfileScores(d); } catch {}
+    // 画像分数由档案自动重算（updateProfileScores 无入参，见 ProfilePage）
+    try { updateProfileScores(); } catch {}
     navigate("/archive");
   };
 

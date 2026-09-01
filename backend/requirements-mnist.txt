@@ -1,0 +1,5 @@
+# 可选 MNIST 深度学习依赖（PyTorch）— 按需安装：
+#   pip install -r requirements.txt -r requirements-mnist.txt
+# 纯算法机房/无 GPU 环境可只装 requirements.txt，MNIST 前端自动降级。
+torch>=2.0.0
+torchvision>=0.15.0

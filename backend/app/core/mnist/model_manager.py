@@ -14,16 +14,18 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from pathlib import Path
 
+from app.config import DATA_DIR as _BACKEND_DATA_DIR
 from app.core.mnist.architectures import build_model, get_architecture
+from app.core.mnist.data_loader import MNIST_DATA_ROOT
 
 PRETRAINED_IDS = ["minicnn", "standardcnn", "deepcnn"]
 
 # 合法 model_id 白名单（P1-6：防止路径遍历，如 model_id="../../x" 拼出 _MODELS_DIR 之外）
 ALLOWED_MODEL_IDS = frozenset(PRETRAINED_IDS + ["user"])
 
-_MODELS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data" / "models"
+# P2：模型目录锚定 backend/data/models（不再相对 CWD）
+_MODELS_DIR = _BACKEND_DATA_DIR / "models"
 _MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 # S-高-2：后台预训练状态持久化文件（进程重启不丢失训练进度/状态）
@@ -262,7 +264,7 @@ class ModelManager:
         tf = transforms.Compose(
             [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
         )
-        train_ds = datasets.MNIST(root="./data", train=True, download=True, transform=tf)
+        train_ds = datasets.MNIST(root=str(MNIST_DATA_ROOT), train=True, download=True, transform=tf)
         train_loader = DataLoader(train_ds, batch_size=64, shuffle=True)
 
         model = build_model(arch).to(device)

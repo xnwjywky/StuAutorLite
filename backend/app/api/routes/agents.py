@@ -1,6 +1,8 @@
 """多智能体交互接口 — 设计文档 §9.3 + §11"""
 
 import asyncio
+import ipaddress
+import socket
 from urllib.parse import urlparse
 
 import httpx
@@ -31,6 +33,44 @@ _LOCAL_NO_KEY = "local-no-key"
 def _is_local_url(url: str | None) -> bool:
     """判断地址是否为本地回环地址（本地推理服务无 key 通路仅对这些地址放开）。"""
     return any(h in (url or "").lower() for h in _LOCAL_HOST_HINTS)
+
+
+# SSRF 防护（P0-2）：本地模型探测仅允许「回环 + RFC1918 局域网」地址。
+# 拒绝公网 / 云元数据(169.254.169.254) / 保留 / 组播地址，防止服务端被当作
+# 内网探测与扫描代理使用。
+_ALLOWED_PROBE_NETS = (
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+)
+
+
+def _probe_target_error(raw: str) -> str | None:
+    """校验探测目标是否安全。合法返回 None，否则返回错误消息。
+
+    主机名先解析为 IP，所有解析结果都须落在允许网段内
+    （防止域名被 DNS 解析到公网 / 云元数据等不应探测的地址）。
+    """
+    parsed = urlparse(raw)
+    host = parsed.hostname or ""
+    if not host:
+        return "地址为空"
+    try:
+        addrs = socket.getaddrinfo(host, parsed.port or 80, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return f"无法解析主机: {host}"
+    if not addrs:
+        return f"无法解析主机: {host}"
+    for _, _, _, _, sockaddr in addrs:
+        try:
+            ip = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            return f"无法解析地址: {sockaddr[0]}"
+        if not any(ip in net for net in _ALLOWED_PROBE_NETS):
+            return f"目标 {ip} 不在允许范围（仅支持本机回环或局域网地址）"
+    return None
 
 
 def _parse_local_models(data: dict) -> list[str]:
@@ -69,6 +109,11 @@ def _build_llm(
     对本地回环地址放开 key 校验；公网地址仍强制要求 key。
     """
     if not x_api_base or not x_api_model:
+        return None
+    # P0-2 加固：仅接受 http/https 且 host 非空，拒绝 file:// 等非网络协议，
+    # 避免把 Key/Prompt 通过非预期协议发往任意目标。
+    _parsed_base = urlparse(x_api_base)
+    if _parsed_base.scheme not in ("http", "https") or not _parsed_base.hostname:
         return None
     is_local = _is_local_url(x_api_base)
     if not x_api_key and not is_local:
@@ -148,6 +193,11 @@ async def probe_custom_local(req: LocalProbeRequest):
     parsed = urlparse(raw)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         return {"found": False, "services": [], "error": "仅支持 http/https 地址"}
+
+    # SSRF 防护（P0-2）：仅允许探测回环 + 局域网地址，拒绝公网/云元数据等
+    err = _probe_target_error(raw)
+    if err:
+        return {"found": False, "services": [], "error": err}
 
     candidates = _probe_candidates(raw)
     async with httpx.AsyncClient(timeout=3.0) as client:

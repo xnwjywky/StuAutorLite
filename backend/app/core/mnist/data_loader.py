@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from pathlib import Path
+
+from app.config import DATA_DIR as _BACKEND_DATA_DIR
 
 _log = logging.getLogger("mnist.data")
 
-DATA_DIR = Path("./data/MNIST/raw")
+# P2：MNIST 数据根目录锚定 backend/data/MNIST（不再相对 CWD）
+MNIST_DATA_ROOT = _BACKEND_DATA_DIR / "MNIST"
+DATA_DIR = MNIST_DATA_ROOT / "raw"
 
 # 期望文件（解压后）+ 大小（字节）；齐全且大小一致视为数据就绪
 _EXPECTED_FILES = {
@@ -65,8 +68,8 @@ def _download_sync() -> None:
     tf = transforms.Compose(
         [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
     )
-    datasets.MNIST(root="./data", train=True, download=True, transform=tf)
-    datasets.MNIST(root="./data", train=False, download=True, transform=tf)
+    datasets.MNIST(root=str(MNIST_DATA_ROOT), train=True, download=True, transform=tf)
+    datasets.MNIST(root=str(MNIST_DATA_ROOT), train=False, download=True, transform=tf)
 
 
 async def ensure_mnist_data_async() -> bool:

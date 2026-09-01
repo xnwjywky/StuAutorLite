@@ -1,5 +1,7 @@
 """FastAPI 入口"""
 
+from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -9,7 +11,68 @@ from app.models.database import init_db
 from app.config import settings
 from app.utils.rate_limit import rate_limit_middleware
 
-app = FastAPI(title=settings.app_name, debug=settings.debug)
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """应用生命周期（P2：替换已弃用的 @app.on_event("startup")）。
+
+    异步初始化，不阻塞 API 接收请求：
+    数据库初始化快速执行；模型扫描、数据下载、预训练全部移入后台任务，
+    startup 立即返回，uvicorn 即刻接受请求。
+    """
+    import asyncio
+    import logging
+    from pathlib import Path
+
+    _log_dir = Path(__file__).resolve().parent.parent / "logs"  # backend/logs/
+    _log_dir.mkdir(exist_ok=True)
+
+    # 配置启动日志文件
+    startup_log = logging.getLogger("app.startup")
+    startup_log.setLevel(logging.DEBUG)
+    if not startup_log.handlers:
+        fh = logging.FileHandler(str(_log_dir / "app.log"), encoding="utf-8")
+        fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+        startup_log.addHandler(fh)
+        startup_log.addHandler(logging.StreamHandler())  # 也输出到控制台
+
+    startup_log.info("=" * 50)
+    startup_log.info("StuAutorLite 后端启动中...")
+
+    # 1. 初始化数据库（快；用 to_thread 避免阻塞事件循环）
+    await asyncio.to_thread(init_db)
+    startup_log.info("[1/3] 数据库初始化完成")
+
+    # 2+3. 模型扫描 / MNIST 数据准备 / 预训练：全部丢后台任务，立即返回
+    async def _background_init():
+        """后台初始化：扫描模型 → 校验/下载 MNIST 数据 → 启动预训练。不阻塞 API。"""
+        try:
+            from app.core.mnist.model_manager import ModelManager, PRETRAINED_IDS
+            mgr = ModelManager.get_instance()
+            cached = [aid for aid in PRETRAINED_IDS if mgr.is_pretrained_cached(aid)]
+            missing = [aid for aid in PRETRAINED_IDS if not mgr.is_pretrained_cached(aid)]
+            startup_log.info(f"[2/3] 预训练模型: 已缓存 {len(cached)}, 缺失 {len(missing)}")
+
+            # 数据完整性校验 + 缺失则后台下载（不阻塞，状态可经 /api/mnist/data-status 查询）
+            from app.core.mnist.data_loader import ensure_mnist_data_async, get_data_status
+            await ensure_mnist_data_async()
+            startup_log.info(f"[2/3] MNIST 数据状态: {get_data_status()['progress']}")
+
+            # 数据就绪后才启动预训练（预训练依赖数据集）
+            from app.core.mnist.runner import _detect_device
+            device_obj, _ = _detect_device()
+            startup_log.info(f"[3/3] 检测设备: {device_obj}")
+            ModelManager.start_pretrain_background(device=str(device_obj))
+        except Exception as e:
+            startup_log.warning(f"后台初始化失败（非致命，MNIST 功能可能暂不可用）: {e}")
+
+    asyncio.create_task(_background_init())  # fire-and-forget，startup 立即返回
+    startup_log.info("API 已就绪，MNIST 数据准备在后台进行")
+
+    yield
+
+
+app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
 
 # 全站轻量鉴权（P0-2）：APP_KEY 配置后所有 /api 路由须带 X-App-Key；
 # 未配置时依赖自动放行（默认开发态，向后兼容）。
@@ -83,63 +146,6 @@ app.include_router(digits.router, prefix="/api", dependencies=_API_DEPENDENCIES)
 app.include_router(imagerecog.router, prefix="/api", dependencies=_API_DEPENDENCIES)
 app.include_router(mnist.router, prefix="/api", dependencies=_API_DEPENDENCIES)
 app.include_router(rl.router, prefix="/api", dependencies=_API_DEPENDENCIES)
-
-
-@app.on_event("startup")
-async def on_startup():
-    """应用启动：异步初始化，不阻塞 API 接收请求。
-
-    MNIST_DOWNLOAD_NONBLOCKING_PLAN：数据库初始化快速执行；模型扫描、
-    数据下载、预训练全部移入后台任务，startup 立即返回，uvicorn 即刻接受请求。
-    """
-    import asyncio
-    import logging
-    from pathlib import Path
-
-    _log_dir = Path(__file__).resolve().parent.parent / "logs"  # backend/logs/
-    _log_dir.mkdir(exist_ok=True)
-
-    # 配置启动日志文件
-    startup_log = logging.getLogger("app.startup")
-    startup_log.setLevel(logging.DEBUG)
-    if not startup_log.handlers:
-        fh = logging.FileHandler(str(_log_dir / "app.log"), encoding="utf-8")
-        fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-        startup_log.addHandler(fh)
-        startup_log.addHandler(logging.StreamHandler())  # 也输出到控制台
-
-    startup_log.info("=" * 50)
-    startup_log.info("StuAutorLite 后端启动中...")
-
-    # 1. 初始化数据库（快；用 to_thread 避免阻塞事件循环）
-    await asyncio.to_thread(init_db)
-    startup_log.info("[1/3] 数据库初始化完成")
-
-    # 2+3. 模型扫描 / MNIST 数据准备 / 预训练：全部丢后台任务，立即返回
-    async def _background_init():
-        """后台初始化：扫描模型 → 校验/下载 MNIST 数据 → 启动预训练。不阻塞 API。"""
-        try:
-            from app.core.mnist.model_manager import ModelManager, PRETRAINED_IDS
-            mgr = ModelManager.get_instance()
-            cached = [aid for aid in PRETRAINED_IDS if mgr.is_pretrained_cached(aid)]
-            missing = [aid for aid in PRETRAINED_IDS if not mgr.is_pretrained_cached(aid)]
-            startup_log.info(f"[2/3] 预训练模型: 已缓存 {len(cached)}, 缺失 {len(missing)}")
-
-            # 数据完整性校验 + 缺失则后台下载（不阻塞，状态可经 /api/mnist/data-status 查询）
-            from app.core.mnist.data_loader import ensure_mnist_data_async, get_data_status
-            await ensure_mnist_data_async()
-            startup_log.info(f"[2/3] MNIST 数据状态: {get_data_status()['progress']}")
-
-            # 数据就绪后才启动预训练（预训练依赖数据集）
-            from app.core.mnist.runner import _detect_device
-            device_obj, _ = _detect_device()
-            startup_log.info(f"[3/3] 检测设备: {device_obj}")
-            ModelManager.start_pretrain_background(device=str(device_obj))
-        except Exception as e:
-            startup_log.warning(f"后台初始化失败（非致命，MNIST 功能可能暂不可用）: {e}")
-
-    asyncio.create_task(_background_init())  # fire-and-forget，startup 立即返回
-    startup_log.info("API 已就绪，MNIST 数据准备在后台进行")
 
 
 @app.get("/")

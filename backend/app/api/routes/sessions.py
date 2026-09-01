@@ -12,7 +12,8 @@ router = APIRouter(prefix="/research/sessions", tags=["sessions"])
 
 @router.get("/")
 def list_sessions(db: DbSession = Depends(get_db)):
-    return db.query(SessionModel).order_by(SessionModel.updated_at.desc()).all()
+    # P2：序列化后再返回，避免直接返回 ORM 对象（会话关闭后懒加载字段读取会报错）
+    return [_serialize_session(s) for s in db.query(SessionModel).order_by(SessionModel.updated_at.desc()).all()]
 
 
 @router.post("/", response_model=SessionResponse)

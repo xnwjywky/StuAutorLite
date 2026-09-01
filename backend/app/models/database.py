@@ -1,9 +1,14 @@
 """数据库模型 — 设计文档 §10"""
 
-from sqlalchemy import create_engine, Column, Integer, String, Text, Float, DateTime, ForeignKey, func, inspect, text, event
+from sqlalchemy import create_engine, Column, Integer, String, Text, Float, DateTime, ForeignKey, func, inspect, text, event, Index
 from sqlalchemy.orm import DeclarativeBase, sessionmaker, relationship
 
-DATABASE_URL = "sqlite:///./data/stuautor.db"
+from app.config import settings, DATA_DIR
+
+# P2：数据库路径锚定 backend/data/stuautor.db（由 config.database_url 提供绝对路径，
+# 仍可用环境变量 DATABASE_URL 覆盖，docker-compose 传参同样生效）。
+DATABASE_URL = settings.database_url
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
@@ -27,6 +32,7 @@ class Base(DeclarativeBase):
 # ── 研究会话 ─────────────────────────────────────────────
 class Session(Base):
     __tablename__ = "sessions"
+    __table_args__ = (Index("ix_sessions_updated_at", "updated_at"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     student_id = Column(String(64), default="demo")
@@ -58,6 +64,7 @@ class Session(Base):
 # ── 研究问题 ─────────────────────────────────────────────
 class Question(Base):
     __tablename__ = "questions"
+    __table_args__ = (Index("ix_questions_session_id", "session_id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
@@ -74,6 +81,7 @@ class Question(Base):
 # ── 假设 ─────────────────────────────────────────────────
 class Hypothesis(Base):
     __tablename__ = "hypotheses"
+    __table_args__ = (Index("ix_hypotheses_session_id", "session_id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
@@ -87,6 +95,7 @@ class Hypothesis(Base):
 # ── 实验设计 ─────────────────────────────────────────────
 class ExperimentDesign(Base):
     __tablename__ = "experiment_designs"
+    __table_args__ = (Index("ix_experiment_designs_session_id", "session_id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
@@ -105,6 +114,7 @@ class ExperimentDesign(Base):
 # ── 实验运行 ─────────────────────────────────────────────
 class ExperimentRun(Base):
     __tablename__ = "experiment_runs"
+    __table_args__ = (Index("ix_experiment_runs_session_id", "session_id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
@@ -129,6 +139,7 @@ class ExperimentRun(Base):
 # ── 分析记录 ─────────────────────────────────────────────
 class AnalysisRecord(Base):
     __tablename__ = "analysis_records"
+    __table_args__ = (Index("ix_analysis_records_session_id", "session_id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
@@ -143,6 +154,7 @@ class AnalysisRecord(Base):
 # ── 研究报告 ─────────────────────────────────────────────
 class ResearchReport(Base):
     __tablename__ = "reports"
+    __table_args__ = (Index("ix_reports_session_id", "session_id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
@@ -164,6 +176,7 @@ class ResearchReport(Base):
 class ReflectionQuestion(Base):
     """每次实验的反思问题池 — 设计文档 §12.7"""
     __tablename__ = "reflection_questions"
+    __table_args__ = (Index("ix_reflection_questions_session_task", "session_id", "task_id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
@@ -184,6 +197,7 @@ class ReflectionQuestion(Base):
 # ── 图像分类实验运行 (§16.2) ─────────────────────────────
 class ClassifyRun(Base):
     __tablename__ = "classify_runs"
+    __table_args__ = (Index("ix_classify_runs_session_id", "session_id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
@@ -211,6 +225,7 @@ class ClassifyRun(Base):
 # ── 猜数字实验运行 ─────────────────────────────────────────
 class GuessRun(Base):
     __tablename__ = "guess_runs"
+    __table_args__ = (Index("ix_guess_runs_session_id", "session_id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
@@ -233,6 +248,7 @@ class GuessRun(Base):
 # ── 排序算法实验运行 ──────────────────────────────────────
 class SortingRun(Base):
     __tablename__ = "sorting_runs"
+    __table_args__ = (Index("ix_sorting_runs_session_id", "session_id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
@@ -256,6 +272,7 @@ class SortingRun(Base):
 # ── 字符串搜索实验运行 ────────────────────────────────────
 class StringSearchRun(Base):
     __tablename__ = "string_search_runs"
+    __table_args__ = (Index("ix_string_search_runs_session_id", "session_id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
@@ -281,6 +298,7 @@ class StringSearchRun(Base):
 # ── 图形识别实验运行 ──────────────────────────────────────
 class ShapeRecogRun(Base):
     __tablename__ = "shape_recog_runs"
+    __table_args__ = (Index("ix_shape_recog_runs_session_id", "session_id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
@@ -307,6 +325,7 @@ class ShapeRecogRun(Base):
 # ── 手写数字识别实验运行 ──────────────────────────────────
 class DigitsRun(Base):
     __tablename__ = "digits_runs"
+    __table_args__ = (Index("ix_digits_runs_session_id", "session_id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
@@ -332,6 +351,7 @@ class DigitsRun(Base):
 # ── 统一图像识别实验运行（§16.2 合并模块）──────────────────
 class ImageRecogRun(Base):
     __tablename__ = "imagerecog_runs"
+    __table_args__ = (Index("ix_imagerecog_runs_session_id", "session_id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
@@ -360,6 +380,7 @@ class ImageRecogRun(Base):
 # ── MNIST 手写数字识别实验运行 ────────────────────────────
 class MNISTRun(Base):
     __tablename__ = "mnist_runs"
+    __table_args__ = (Index("ix_mnist_runs_session_id", "session_id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
@@ -387,6 +408,7 @@ class MNISTRun(Base):
 # ── 强化学习格子世界实验运行 ────────────────────────────
 class RLRun(Base):
     __tablename__ = "rl_runs"
+    __table_args__ = (Index("ix_rl_runs_session_id", "session_id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
@@ -428,6 +450,40 @@ def get_db():
 def init_db():
     Base.metadata.create_all(bind=engine)
     _migrate_reflection_task_id()
+    _migrate_indexes()
+
+
+# P2：高频查询列索引（与各模型 __table_args__ 保持一致）。
+# create_all 不会给已存在的旧库补索引，这里用幂等 CREATE INDEX IF NOT EXISTS 迁移。
+_INDEX_SQL = [
+    "CREATE INDEX IF NOT EXISTS ix_sessions_updated_at ON sessions (updated_at)",
+    "CREATE INDEX IF NOT EXISTS ix_questions_session_id ON questions (session_id)",
+    "CREATE INDEX IF NOT EXISTS ix_hypotheses_session_id ON hypotheses (session_id)",
+    "CREATE INDEX IF NOT EXISTS ix_experiment_designs_session_id ON experiment_designs (session_id)",
+    "CREATE INDEX IF NOT EXISTS ix_experiment_runs_session_id ON experiment_runs (session_id)",
+    "CREATE INDEX IF NOT EXISTS ix_analysis_records_session_id ON analysis_records (session_id)",
+    "CREATE INDEX IF NOT EXISTS ix_reports_session_id ON reports (session_id)",
+    "CREATE INDEX IF NOT EXISTS ix_reflection_questions_session_task ON reflection_questions (session_id, task_id)",
+    "CREATE INDEX IF NOT EXISTS ix_classify_runs_session_id ON classify_runs (session_id)",
+    "CREATE INDEX IF NOT EXISTS ix_guess_runs_session_id ON guess_runs (session_id)",
+    "CREATE INDEX IF NOT EXISTS ix_sorting_runs_session_id ON sorting_runs (session_id)",
+    "CREATE INDEX IF NOT EXISTS ix_string_search_runs_session_id ON string_search_runs (session_id)",
+    "CREATE INDEX IF NOT EXISTS ix_shape_recog_runs_session_id ON shape_recog_runs (session_id)",
+    "CREATE INDEX IF NOT EXISTS ix_digits_runs_session_id ON digits_runs (session_id)",
+    "CREATE INDEX IF NOT EXISTS ix_imagerecog_runs_session_id ON imagerecog_runs (session_id)",
+    "CREATE INDEX IF NOT EXISTS ix_mnist_runs_session_id ON mnist_runs (session_id)",
+    "CREATE INDEX IF NOT EXISTS ix_rl_runs_session_id ON rl_runs (session_id)",
+]
+
+
+def _migrate_indexes():
+    """为已有数据库补充高频查询列索引（幂等，缺失表自动跳过）。"""
+    try:
+        with engine.begin() as conn:
+            for stmt in _INDEX_SQL:
+                conn.execute(text(stmt))
+    except Exception:
+        pass
 
 
 def _migrate_reflection_task_id():

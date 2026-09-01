@@ -12,7 +12,8 @@ import SortVisualizer from "../components/SortVisualizer";
 import StringSearchVisualizer from "../components/StringSearchVisualizer";
 import ReflectionStage from "../components/ReflectionStage";
 import { useAlgoCompareStore } from "../stores/sortingStore";
-import { runSortingExperiment, runStringSearchExperiment, saveQuestion, saveAnalysis, callMentor, callDataAnalyst, hasAgentConfig, logAgentError } from "../api/service";
+import { runSortingExperiment, runStringSearchExperiment, saveQuestion, saveAnalysis, callMentor, callDataAnalyst } from "../api/service";
+import { callAgent } from "../utils/agent";
 import { archiveSession } from "./Archive";
 import { renderMarkdown } from "../utils/markdown";
 import type { ResearchStage, SortingAlgorithmType, StringSearchAlgorithmType } from "../types";
@@ -66,23 +67,6 @@ const ALGO_INFO: Record<string, { explanation: string; analogy: string; key_poin
   BOYER_MOORE: { explanation: "从右向左比对，用坏字符规则跳转。实际最快。","analogy": "从最后一个字母比对——不对就整词跳过。",key_points:["从右向左","坏字符跳转","实际最快"],pseudocode:"1. i=0; while i<=n-m:\n2.   j=m-1; while p[j]==t[i+j]: j--\n3.   if j<0: found; i+=1\n4.   else: i+=max(1,j-bad[t[i+j]])" },
   RABIN_KARP: { explanation: "滚动哈希——先比哈希值，相同时再字符验证。","analogy": "先看指纹——一样才仔细比对，每次 O(1) 更新指纹。",key_points:["滚动哈希","先哈希后验证","多模式"],pseudocode:"1. h=hash(p); th=hash(t[0..m-1])\n2. for i=0 to n-m:\n3.   if h==th: verify chars\n4.   th=roll(th,t[i],t[i+m])" },
 };
-
-type AgentResult<T> = { ok: true; data: T } | { ok: false; error: string; agentName: string };
-
-const _agentInFlight = new Set<string>();
-
-async function callAgent(agentName: string, stage: string, fn: () => Promise<{ result?: unknown } | null>): Promise<AgentResult<unknown>> {
-  if (!hasAgentConfig()) return { ok: false, error: "未配置 Agent", agentName };
-  const _key = `${agentName}:${stage}`;
-  if (_agentInFlight.has(_key)) {
-    return { ok: false, error: "该 Agent 正在处理中，请稍候", agentName };
-  }
-  _agentInFlight.add(_key);
-  try { const resp = await fn(); const result = resp?.result as Record<string, unknown> | undefined; if (result?.error) { logAgentError(agentName, stage, String(result.error)); return { ok: false, error: String(result.error), agentName }; } if (result && Object.keys(result).length > 0) return { ok: true, data: result }; return { ok: false, error: `${agentName} 返回空结果`, agentName }; }
-  catch (e: any) { logAgentError(agentName, stage, e?.message || String(e)); return { ok: false, error: e?.message || String(e), agentName }; } finally {
-    _agentInFlight.delete(_key);
-  }
-}
 
 export default function SortingWorkbench() {
   const { sessionId } = useParams<{ sessionId: string }>();

@@ -6,7 +6,6 @@
 
 ```bash
 # 1. 后端 (Python 3.12 + FastAPI)
-# ⚠️ 必须在 backend/ 目录下执行，并使用 backend/.venv 虚拟环境
 cd backend
 .venv/Scripts/activate          # Windows
 # source .venv/bin/activate     # macOS/Linux
@@ -14,7 +13,7 @@ pip install -r requirements.txt
 
 # MNIST 实验需要 PyTorch（可选，其余 7 类实验为纯 Python 算法，无需 torch）
 # 国产化 ARM（鲲鹏/飞腾）无 PyPI wheel 时，可只装纯 Python 依赖跑非 MNIST 实验
-# pip install torch torchvision numpy psutil
+# pip install -r requirements-mnist.txt
 pip install torch==2.4.0 torch_npu==2.4.0.post2 torchvision==0.19.0 numpy psutil
 
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000

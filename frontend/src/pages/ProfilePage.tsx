@@ -218,7 +218,12 @@ function RadarChart({ scores, dimensions }: { scores: Record<string, number>; di
 }
 
 // ═══════════════════════════════════════════════════════════
-export function updateProfileScores(_delta?: Record<string, number>) {
+/**
+ * 完成研究会话后重新计算画像分数。
+ * 分数完全由档案（loadArchives）重算，不再接收手动 delta（P2：删除被忽略的入参）。
+ * 调用方需先 archiveSession() 再调用本函数，以便把本次会话计入统计。
+ */
+export function updateProfileScores() {
   const computed = computeScoresFromArchives();
   persistScores(computed);
 }

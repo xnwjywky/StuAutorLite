@@ -15,7 +15,17 @@ interface ChartPanelProps {
 }
 
 export default function ChartPanel({ data: rawData, xKey = "algorithm", singleMetric, bars }: ChartPanelProps) {
-  const data = rawData?.length ? rawData : DEFAULT_DATA;
+  const data = rawData ?? [];
+
+  // P2：空数据时展示明确提示，绝不回退硬编码 demo 数据（会误导学生以为这是真实实验结果）
+  if (data.length === 0) {
+    return (
+      <div className="card">
+        <h3 className="text-sm font-semibold text-gray-700 mb-2">{singleMetric?.label ?? "实验结果对比"}</h3>
+        <div className="py-10 text-center text-sm text-gray-400">暂无实验数据 — 请先运行实验后再查看图表</div>
+      </div>
+    );
+  }
 
   if (singleMetric) {
     return (
@@ -59,9 +69,3 @@ export default function ChartPanel({ data: rawData, xKey = "algorithm", singleMe
     </div>
   );
 }
-
-const DEFAULT_DATA = [
-  { algorithm: "BFS", success_rate: 100, path_length: 24.3, expanded_nodes: 91.2, runtime_ms: 31 },
-  { algorithm: "DFS", success_rate: 80, path_length: 37.5, expanded_nodes: 68.4, runtime_ms: 26 },
-  { algorithm: "A*", success_rate: 100, path_length: 24.3, expanded_nodes: 42.7, runtime_ms: 18 },
-];

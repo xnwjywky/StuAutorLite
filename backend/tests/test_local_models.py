@@ -32,6 +32,47 @@ class TestIsLocalUrl:
         assert _is_local_url("") is False
 
 
+class TestProbeTargetError:
+    """SSRF 防护（P0-2）：仅允许回环 + RFC1918 私网，拒绝公网/云元数据。"""
+
+    def test_loopback_ok(self):
+        from app.api.routes.agents import _probe_target_error
+
+        assert _probe_target_error("http://127.0.0.1:11435") is None
+        assert _probe_target_error("http://localhost:11435/v1") is None
+
+    def test_private_lan_ok(self):
+        from app.api.routes.agents import _probe_target_error
+
+        assert _probe_target_error("http://192.168.1.20:8080") is None
+        assert _probe_target_error("http://10.0.0.5:11434") is None
+        assert _probe_target_error("http://172.16.3.9:1234") is None
+
+    def test_cloud_metadata_rejected(self):
+        from app.api.routes.agents import _probe_target_error
+
+        err = _probe_target_error("http://169.254.169.254/latest/meta-data/")
+        assert err is not None and "不在允许范围" in err
+
+    def test_public_host_rejected(self):
+        from app.api.routes.agents import _probe_target_error
+
+        # 使用公网 IP 字面量，避免测试依赖外部 DNS 解析
+        err = _probe_target_error("http://1.1.1.1/api/tags")
+        assert err is not None
+
+    def test_reserved_and_nonlocal_rejected(self):
+        from app.api.routes.agents import _probe_target_error
+
+        assert _probe_target_error("http://0.0.0.0:80") is not None
+        assert _probe_target_error("http://8.8.8.8:80/v1/models") is not None
+
+    def test_empty_host(self):
+        from app.api.routes.agents import _probe_target_error
+
+        assert _probe_target_error("http:///api/tags") is not None
+
+
 class TestParseLocalModels:
     def test_ollama_native_format(self):
         from app.api.routes.agents import _parse_local_models

@@ -18,6 +18,8 @@ import logging
 import threading
 from pathlib import Path
 
+from app.core.mnist.data_loader import MNIST_DATA_ROOT
+
 # ── 训练取消机制 ─────────────────────────────────────────
 # 前端退出运行实验页时调用 /api/mnist/cancel 设置该事件，
 # 训练循环每 batch 检查，尽快中止训练并释放全局互斥锁（避免"已有训练正在进行"卡死）。
@@ -667,10 +669,10 @@ class MNISTRunner:
         _train_log.info("加载 MNIST 数据集...")
         try:
             full_dataset = datasets.MNIST(
-                root="./data", train=True, download=True, transform=transform
+                root=str(MNIST_DATA_ROOT), train=True, download=True, transform=transform
             )
             test_dataset = datasets.MNIST(
-                root="./data", train=False, download=True, transform=transform
+                root=str(MNIST_DATA_ROOT), train=False, download=True, transform=transform
             )
             _train_log.info(f"数据集加载完成: train={len(full_dataset)}, test={len(test_dataset)}")
         except Exception as e:
