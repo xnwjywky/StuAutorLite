@@ -425,7 +425,7 @@ function Stage5() {
             break;
         }
         syncProgress();
-      }, (err) => { if (!ac.signal.aborted) setErrorMsg(err.message); });
+      }, (err) => { if (!ac.signal.aborted) setErrorMsg(err.message); }, ac.signal);
     } catch {
       // silent
     } finally {

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session as DbSession
 from app.models.database import get_db, ClassifyRun, Session as SessionModel
 from app.models.schemas import ClassifyRunRequest
 from app.core.classification.runner import ClassificationExperimentRunner
+from app.utils.pagination import paginate
 
 router = APIRouter(prefix="/classify", tags=["classification"])
 runner = ClassificationExperimentRunner()
@@ -72,15 +73,21 @@ def run_classify_experiment(req: ClassifyRunRequest, db: DbSession = Depends(get
 
 
 @router.get("/runs")
-def list_classify_runs(session_id: int | None = None, db: DbSession = Depends(get_db)):
+def list_classify_runs(session_id: int | None = None, include_data: bool = False,
+                       limit: int = 50, offset: int = 0, db: DbSession = Depends(get_db)):
+    """列表接口分页 + 裁剪（P-性能）：默认不携带 points/labels/predictions/boundary_data
+    大字段（除非 include_data=true），limit/offset 分页（默认 50 条/页，上限 200）。"""
     q = db.query(ClassifyRun)
     if session_id:
         q = q.filter(ClassifyRun.session_id == session_id)
-    return [_run_to_dict(r) for r in q.order_by(ClassifyRun.id.desc()).all()]
+    return paginate(
+        q.order_by(ClassifyRun.id.desc()), limit, offset,
+        lambda r: _run_to_dict(r, include_data=include_data),
+    )
 
 
-def _run_to_dict(r: ClassifyRun) -> dict:
-    return {
+def _run_to_dict(r: ClassifyRun, include_data: bool = False) -> dict:
+    d = {
         "id": r.id,
         "session_id": r.session_id,
         "batch_id": r.batch_id,
@@ -91,12 +98,16 @@ def _run_to_dict(r: ClassifyRun) -> dict:
         "trial": r.trial,
         "seed": r.seed,
         "accuracy": r.accuracy,
+        # 各分类器在噪声梯度上的性能曲线（相对小），始终返回
         "precision": json.loads(r.precision_data) if r.precision_data else [],
         "recall": json.loads(r.recall_data) if r.recall_data else [],
         "f1": json.loads(r.f1_data) if r.f1_data else [],
         "runtime_ms": r.runtime_ms,
-        "points": json.loads(r.points_data) if r.points_data else [],
-        "labels": json.loads(r.labels_data) if r.labels_data else [],
-        "predictions": json.loads(r.predictions_data) if r.predictions_data else [],
-        "boundary_data": json.loads(r.boundary_data) if r.boundary_data else {},
+        "created_at": str(r.created_at) if r.created_at else None,
     }
+    if include_data:
+        d["points"] = json.loads(r.points_data) if r.points_data else []
+        d["labels"] = json.loads(r.labels_data) if r.labels_data else []
+        d["predictions"] = json.loads(r.predictions_data) if r.predictions_data else []
+        d["boundary_data"] = json.loads(r.boundary_data) if r.boundary_data else {}
+    return d

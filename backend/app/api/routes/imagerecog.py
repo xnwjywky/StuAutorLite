@@ -1,11 +1,13 @@
 """统一图像识别实验 API — POST /api/imagerecog/run, /run-stream, GET /api/imagerecog/runs"""
 import json, uuid, asyncio
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session as DbSession
 from pydantic import BaseModel, Field
 from app.models.database import get_db, Session as SessionModel, ImageRecogRun
 from app.core.imagerecog.runner import ImageRecogRunner
+from app.utils.heavy import run_heavy, get_heavy_executor
+from app.utils.pagination import paginate
 
 router = APIRouter(prefix="/imagerecog", tags=["imagerecog"])
 runner = ImageRecogRunner()
@@ -20,7 +22,13 @@ class ImageRecogRunRequest(BaseModel):
 
 
 @router.post("/run")
-def run_imagerecog(req: ImageRecogRunRequest, db: DbSession = Depends(get_db)):
+async def run_imagerecog(req: ImageRecogRunRequest, db: DbSession = Depends(get_db)):
+    """同步返回完整实验结果。
+
+    P-性能：多算法训练/推理 CPU 密集。原 sync def 长占默认线程池 worker，
+    改为 async def：CPU 部分交给专用重型执行器（run_heavy），await 结束才在
+    事件循环线程做轻量 DB 落库。
+    """
     exp_type = req.experiment_type if req.experiment_type in ("shape", "digits") else "shape"
     n_samples = max(30, min(req.settings.get("n_samples", 200), 1000))
     noise_levels = [max(0.0, min(n, 0.5)) for n in req.settings.get("noise_levels", [0.0])]
@@ -37,7 +45,7 @@ def run_imagerecog(req: ImageRecogRunRequest, db: DbSession = Depends(get_db)):
     }
     batch_id = str(uuid.uuid4())[:8]
     try:
-        result = runner.run(config)
+        result = await run_heavy(runner.run, config)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"图像识别实验运行失败: {str(e)}")
 
@@ -80,8 +88,13 @@ def run_imagerecog(req: ImageRecogRunRequest, db: DbSession = Depends(get_db)):
 
 
 @router.post("/run-stream")
-async def run_imagerecog_stream(req: ImageRecogRunRequest):
-    """SSE 流式端点 — 实时推送实验进度（含像素网格预览）"""
+async def run_imagerecog_stream(req: ImageRecogRunRequest, request: Request):
+    """SSE 流式端点 — 实时推送实验进度（含像素网格预览）。
+
+    P-性能/SSE 中止透传：每次 next(gen)（一段 CPU 训练/推理）改走专用重型执行器，
+    不再占默认线程池；每步检查客户端是否断开（前端 AbortController 会关闭底层 fetch），
+    断开即 break 释放 heavy worker，避免对已断开连接继续空转计算。
+    """
     exp_type = req.experiment_type if req.experiment_type in ("shape", "digits") else "shape"
     n_samples = max(30, min(req.settings.get("n_samples", 200), 1000))
     noise_levels = [max(0.0, min(n, 0.5)) for n in req.settings.get("noise_levels", [0.0])]
@@ -102,7 +115,10 @@ async def run_imagerecog_stream(req: ImageRecogRunRequest):
         gen = runner.run_stream(config)
         try:
             while True:
-                event = await loop.run_in_executor(None, next, gen)
+                if await request.is_disconnected():
+                    gen.close()  # 客户端中止：关闭生成器，释放重型 worker
+                    break
+                event = await loop.run_in_executor(get_heavy_executor(), next, gen)
                 # event 中的 grid 数据可能很大，序列化为 JSON
                 payload = json.dumps(event, ensure_ascii=False, default=str)
                 yield f"data: {payload}\n\n"
@@ -126,17 +142,23 @@ async def run_imagerecog_stream(req: ImageRecogRunRequest):
 
 @router.get("/runs")
 def list_runs(session_id: int | None = None, experiment_type: str | None = None,
+              include_data: bool = False, limit: int = 50, offset: int = 0,
               db: DbSession = Depends(get_db)):
+    """列表接口分页 + 裁剪（P-性能）：默认不携带 test_grids/test_labels/predictions/
+    viz_steps 等大字段（除非 include_data=true），limit/offset 分页（默认 50 条/页）。"""
     q = db.query(ImageRecogRun)
     if session_id:
         q = q.filter(ImageRecogRun.session_id == session_id)
     if experiment_type:
         q = q.filter(ImageRecogRun.experiment_type == experiment_type)
-    return [_run_to_dict(r) for r in q.order_by(ImageRecogRun.id.desc()).all()]
+    return paginate(
+        q.order_by(ImageRecogRun.id.desc()), limit, offset,
+        lambda r: _run_to_dict(r, include_data=include_data),
+    )
 
 
-def _run_to_dict(r) -> dict:
-    return {
+def _run_to_dict(r, include_data: bool = False) -> dict:
+    d = {
         "id": r.id, "session_id": r.session_id, "batch_id": r.batch_id,
         "experiment_type": r.experiment_type,
         "algorithm": r.algorithm, "n_samples": r.n_samples,
@@ -144,8 +166,10 @@ def _run_to_dict(r) -> dict:
         "accuracy": r.accuracy, "correct": r.correct, "total": r.total,
         "runtime_ms": r.runtime_ms, "train_ratio": r.train_ratio,
         "params_used": json.loads(r.params_used) if r.params_used else {},
-        "test_grids": json.loads(r.test_grids_data) if r.test_grids_data else [],
-        "test_labels": json.loads(r.test_labels_data) if r.test_labels_data else [],
-        "predictions": json.loads(r.predictions_data) if r.predictions_data else [],
-        "viz_steps": json.loads(r.viz_steps_data) if r.viz_steps_data else [],
     }
+    if include_data:
+        d["test_grids"] = json.loads(r.test_grids_data) if r.test_grids_data else []
+        d["test_labels"] = json.loads(r.test_labels_data) if r.test_labels_data else []
+        d["predictions"] = json.loads(r.predictions_data) if r.predictions_data else []
+        d["viz_steps"] = json.loads(r.viz_steps_data) if r.viz_steps_data else []
+    return d

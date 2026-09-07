@@ -1,5 +1,8 @@
 """FastAPI 入口"""
 
+import asyncio
+import logging
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
@@ -9,7 +12,23 @@ from app.api.auth import verify_app_key
 from app.api.routes import sessions, questions, experiments, analysis, reports, agents, reflection, classify, guessnumber, sorting, stringsearch, shaperecog, digits, imagerecog, mnist, rl
 from app.models.database import init_db
 from app.config import settings
+from app.utils.logger import get_console_handler, get_file_handler
 from app.utils.rate_limit import rate_limit_middleware
+
+# 统一使用 app.log 轮转 handler（P-性能：日志轮转，避免 app.log 无限增长；
+# 多 logger 写同一文件共享同一 handler，杜绝重复轮转同一文件）。
+_APP_LOG_FMT = "%(asctime)s [%(levelname)s] %(message)s"
+startup_log = logging.getLogger("app.startup")
+startup_log.setLevel(logging.DEBUG)
+if not startup_log.handlers:
+    startup_log.addHandler(get_file_handler("app.log", fmt=_APP_LOG_FMT))
+    startup_log.addHandler(get_console_handler())
+
+req_log = logging.getLogger("app.requests")
+req_log.setLevel(logging.DEBUG)
+if not req_log.handlers:
+    req_log.addHandler(get_file_handler("app.log", fmt=_APP_LOG_FMT))
+    req_log.addHandler(get_console_handler())
 
 
 @asynccontextmanager
@@ -20,28 +39,26 @@ async def lifespan(_app: FastAPI):
     数据库初始化快速执行；模型扫描、数据下载、预训练全部移入后台任务，
     startup 立即返回，uvicorn 即刻接受请求。
     """
-    import asyncio
-    import logging
-    from pathlib import Path
-
-    _log_dir = Path(__file__).resolve().parent.parent / "logs"  # backend/logs/
-    _log_dir.mkdir(exist_ok=True)
-
-    # 配置启动日志文件
-    startup_log = logging.getLogger("app.startup")
-    startup_log.setLevel(logging.DEBUG)
-    if not startup_log.handlers:
-        fh = logging.FileHandler(str(_log_dir / "app.log"), encoding="utf-8")
-        fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-        startup_log.addHandler(fh)
-        startup_log.addHandler(logging.StreamHandler())  # 也输出到控制台
-
     startup_log.info("=" * 50)
     startup_log.info("StuAutorLite 后端启动中...")
 
     # 1. 初始化数据库（快；用 to_thread 避免阻塞事件循环）
     await asyncio.to_thread(init_db)
     startup_log.info("[1/3] 数据库初始化完成")
+
+    # 留存策略：后台清理超过保留期的运行明细大字段，控制 SQLite 体积（幂等、非致命）
+    async def _background_retention():
+        if not settings.run_retention_days:
+            return
+        try:
+            from app.utils.retention import prune_run_payloads
+            freed = await asyncio.to_thread(prune_run_payloads, settings.run_retention_days)
+            if freed:
+                startup_log.info(f"留存清理：已裁剪 {freed} 处旧实验明细大字段")
+        except Exception as e:
+            startup_log.warning(f"留存清理失败（非致命）: {e}")
+
+    asyncio.create_task(_background_retention())
 
     # 2+3. 模型扫描 / MNIST 数据准备 / 预训练：全部丢后台任务，立即返回
     async def _background_init():
@@ -71,6 +88,13 @@ async def lifespan(_app: FastAPI):
 
     yield
 
+    # 关闭共享 LLM 连接池（P-性能：httpx.AsyncClient 进程级复用，退出时释放）
+    try:
+        from app.utils.llm_client import close_shared_client
+        await close_shared_client()
+    except Exception:
+        pass
+
 
 app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
 
@@ -79,27 +103,13 @@ app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
 _API_DEPENDENCIES = [Depends(verify_app_key)]
 
 
-# ── 请求日志中间件（所有入站请求均记录到控制台 + app.log）──
+# ── 请求日志中间件（所有入站请求均记录到控制台 + app.log，handler 模块级轮转）──
 @app.middleware("http")
 async def log_requests(request, call_next):
-    import logging, time
-    _req_log = logging.getLogger("app.requests")
-    _req_log.setLevel(logging.DEBUG)
-    if not _req_log.handlers:
-        from pathlib import Path
-        _log_dir = Path(__file__).resolve().parent.parent / "logs"
-        _log_dir.mkdir(exist_ok=True)
-        _fh = logging.FileHandler(str(_log_dir / "app.log"), encoding="utf-8")
-        _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-        _req_log.addHandler(_fh)
-        _sh = logging.StreamHandler()
-        _sh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-        _req_log.addHandler(_sh)
-
     t0 = time.time()
     response = await call_next(request)
     ms = round((time.time() - t0) * 1000)
-    _req_log.info(f"{request.method} {request.url.path} → {response.status_code} ({ms}ms)")
+    req_log.info(f"{request.method} {request.url.path} → {response.status_code} ({ms}ms)")
     return response
 
 

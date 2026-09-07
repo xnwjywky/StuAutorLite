@@ -8,6 +8,7 @@ from app.models.database import get_db, ExperimentDesign, ExperimentRun, Session
 from app.models.schemas import ExperimentDesignCreate, ExperimentRunRequest
 from app.core.experiment_runner import ExperimentRunner
 from app.agents.experiment_designer import ExperimentDesigner
+from app.utils.pagination import paginate
 
 router = APIRouter(prefix="/experiments", tags=["experiments"])
 runner = ExperimentRunner()
@@ -103,11 +104,17 @@ def run_experiment(req: ExperimentRunRequest, db: DbSession = Depends(get_db)):
 
 
 @router.get("/runs")
-def list_runs(session_id: int | None = None, db: DbSession = Depends(get_db)):
+def list_runs(session_id: int | None = None, include_data: bool = False,
+              limit: int = 50, offset: int = 0, db: DbSession = Depends(get_db)):
+    """列表接口分页 + 裁剪（P-性能）：默认不携带 path/visited_nodes/maze_grid 大字段
+    （除非 include_data=true），limit/offset 分页（默认 50 条/页，上限 200）。"""
     q = db.query(ExperimentRun)
     if session_id:
         q = q.filter(ExperimentRun.session_id == session_id)
-    return [_run_to_dict(r) for r in q.order_by(ExperimentRun.id.desc()).all()]
+    return paginate(
+        q.order_by(ExperimentRun.id.desc()), limit, offset,
+        lambda r: _run_to_dict(r, include_data=include_data),
+    )
 
 
 # ── helpers ──────────────────────────────────────────────
@@ -125,19 +132,23 @@ def _design_to_dict(d: ExperimentDesign) -> dict:
     }
 
 
-def _run_to_dict(r: ExperimentRun) -> dict:
-    return {
+def _run_to_dict(r: ExperimentRun, include_data: bool = False) -> dict:
+    d = {
         "id": r.id,
         "session_id": r.session_id,
         "batch_id": r.batch_id,
         "algorithm": r.algorithm,
         "obstacle_ratio": r.obstacle_ratio,
+        "maze_size": json.loads(r.maze_size) if r.maze_size and r.maze_size.startswith("[") else r.maze_size,
         "trial": r.trial,
         "success": bool(r.success),
         "path_length": r.path_length,
         "expanded_nodes": r.expanded_nodes,
         "runtime_ms": r.runtime_ms,
-        "path": json.loads(r.path_data) if r.path_data else [],
-        "visited_nodes": json.loads(r.visited_data) if r.visited_data else [],
-        "maze_grid": json.loads(r.maze_data) if r.maze_data else [],
+        "created_at": str(r.created_at) if r.created_at else None,
     }
+    if include_data:
+        d["path"] = json.loads(r.path_data) if r.path_data else []
+        d["visited_nodes"] = json.loads(r.visited_data) if r.visited_data else []
+        d["maze_grid"] = json.loads(r.maze_data) if r.maze_data else []
+    return d

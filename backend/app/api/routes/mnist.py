@@ -1,6 +1,5 @@
 """MNIST 手写数字识别实验 API"""
 import json, uuid, asyncio, logging
-from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session as DbSession
@@ -8,19 +7,27 @@ from pydantic import BaseModel, Field
 from app.models.database import get_db, Session as SessionModel, MNISTRun
 from app.core.mnist.runner import MNISTRunner, _probe_hardware, _detect_device
 from app.core.mnist.architectures import PRESET_ARCHITECTURES, get_architecture
+from app.utils.heavy import run_heavy, get_heavy_executor
+from app.utils.logger import get_file_handler
+from app.utils.pagination import paginate
 
 router = APIRouter(prefix="/mnist", tags=["mnist"])
 runner = MNISTRunner()
 
-# ── 专用错误日志 ──
-_LOG_DIR = Path(__file__).resolve().parent.parent.parent.parent / "logs"
-_LOG_DIR.mkdir(exist_ok=True)
+# ── 专用错误日志（P-性能：轮转 handler，防 mnist_errors.log 无限增长）──
 _mnist_log = logging.getLogger("mnist")
 _mnist_log.setLevel(logging.DEBUG)
 if not _mnist_log.handlers:
-    _fh = logging.FileHandler(str(_LOG_DIR / "mnist_errors.log"), encoding="utf-8")
-    _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-    _mnist_log.addHandler(_fh)
+    _mnist_log.addHandler(get_file_handler("mnist_errors.log", fmt="%(asctime)s [%(levelname)s] %(message)s"))
+
+
+def _run_mnist_blocking(config: dict) -> dict | None:
+    """在重型执行器中同步跑完整个训练，返回 'done' 事件（/run 使用；
+    SSE 走 /run-stream 逐事件 offload，不在此函数内）。"""
+    for event in runner.run_stream(config):
+        if event["type"] == "done":
+            return event
+    return None
 
 
 class MNISTRunRequest(BaseModel):
@@ -149,7 +156,14 @@ async def retry_mnist_download():
 
 
 @router.post("/run")
-def run_mnist(req: MNISTRunRequest, db: DbSession = Depends(get_db)):
+async def run_mnist(req: MNISTRunRequest, db: DbSession = Depends(get_db)):
+    """同步返回完整训练结果。
+
+    P-性能：训练是 torch CPU 密集（可数分钟）。原 sync def 会让 FastAPI 用默认
+    线程池（~40 worker）的 worker 全程跑训练，长时间饿死其它同步请求。改为 async def：
+    训练经 run_heavy 交给专用重型执行器（3 worker），等待期间事件循环与默认线程池
+    保持空闲；CPU 结束才回到事件循环线程做轻量 DB 落库。
+    """
     from app.core.mnist.model_manager import ModelManager
 
     # MNIST_DOWNLOAD_NONBLOCKING：数据未就绪立即 503，不占训练锁
@@ -157,7 +171,7 @@ def run_mnist(req: MNISTRunRequest, db: DbSession = Depends(get_db)):
 
     # P0-1（MNIST_ACCURACY_FIX）：全局训练互斥——等待其它训练（含后台预训练）
     # 完成，最多 30s；否则返回 409。杜绝 torch CPU 并发训练数据竞争。
-    if not ModelManager.acquire_training(timeout=30.0):
+    if not await asyncio.to_thread(ModelManager.acquire_training, 30.0):
         raise HTTPException(status_code=409, detail="已有训练正在进行，请稍后再试")
 
     config = {
@@ -168,17 +182,16 @@ def run_mnist(req: MNISTRunRequest, db: DbSession = Depends(get_db)):
     }
     batch_id = str(uuid.uuid4())[:8]
     try:
-        result = None
-        for event in runner.run_stream(config):
-            if event["type"] == "done":
-                result = event
+        result = await run_heavy(_run_mnist_blocking, config)
         if result is None:
             raise HTTPException(status_code=500, detail="训练未产生结果")
+    except HTTPException:
+        raise
     except Exception as e:
         _mnist_log.error(f"训练失败: {str(e)}")
         raise HTTPException(status_code=400, detail=f"MNIST 训练失败: {str(e)}")
     finally:
-        ModelManager.release_training()
+        await asyncio.to_thread(ModelManager.release_training)
 
     r0 = result["runs"][0]
     run = MNISTRun(
@@ -247,7 +260,7 @@ async def run_mnist_stream(req: MNISTRunRequest, request: Request):
         # P0-1（MNIST_ACCURACY_FIX）：前端实际训练走本端点（SSE），必须与后台预训练
         # 共用全局互斥——忙时等待最多 30s，仍忙则以 error 事件告知。锁覆盖整个事件流
         # （SSE 惰性生成，训练在迭代时执行），finally 保证正常/异常/断开都释放。
-        if not await loop.run_in_executor(None, ModelManager.acquire_training, 30.0):
+        if not await loop.run_in_executor(get_heavy_executor(), ModelManager.acquire_training, 30.0):
             yield f"data: {json.dumps({'type':'error','message':'已有训练正在进行，请稍后再试'}, ensure_ascii=False)}\n\n"
             return
         # 新训练干净启动：清掉可能残留的取消事件（上次退出时若没有在跑的训练，
@@ -263,7 +276,9 @@ async def run_mnist_stream(req: MNISTRunRequest, request: Request):
                 if await request.is_disconnected():
                     _mnist_log.info("SSE client disconnected, aborting training")
                     break
-                event = await loop.run_in_executor(None, next, gen)
+                # P-性能：每个 next(gen) 执行一批训练（torch CPU 密集），改走专用
+                # 重型执行器而非默认线程池，避免长时间占用 FastAPI ~40 默认 worker。
+                event = await loop.run_in_executor(get_heavy_executor(), next, gen)
                 payload = json.dumps(event, ensure_ascii=False, default=str)
                 yield f"data: {payload}\n\n"
                 if event["type"] == "error":
@@ -307,11 +322,17 @@ def cancel_training():
 
 
 @router.get("/runs")
-def list_runs(session_id: int | None = None, db: DbSession = Depends(get_db)):
+def list_runs(session_id: int | None = None, include_data: bool = False,
+              limit: int = 50, offset: int = 0, db: DbSession = Depends(get_db)):
+    """列表接口分页 + 裁剪（P-性能）：默认不携带各 epoch 曲线与混淆矩阵等大字段
+    （除非 include_data=true），limit/offset 分页（默认 50 条/页，上限 200）。"""
     q = db.query(MNISTRun)
     if session_id:
         q = q.filter(MNISTRun.session_id == session_id)
-    return [_run_to_dict(r) for r in q.order_by(MNISTRun.id.desc()).all()]
+    return paginate(
+        q.order_by(MNISTRun.id.desc()), limit, offset,
+        lambda r: _run_to_dict(r, include_data=include_data),
+    )
 
 
 # ═══════ 上传图片识别 ═══════
@@ -434,23 +455,28 @@ def delete_user_model(session_id: int):
     return {"deleted": True, "session_id": session_id}
 
 
-def _run_to_dict(r) -> dict:
-    return {
+def _run_to_dict(r, include_data: bool = False) -> dict:
+    d = {
         "id": r.id, "session_id": r.session_id, "batch_id": r.batch_id,
         "architecture_id": r.architecture_id,
         "architecture": json.loads(r.architecture_json) if r.architecture_json else {},
         "hyperparameters": json.loads(r.hyperparams_json) if r.hyperparams_json else {},
         "seed": r.seed,
+        # 标量指标始终返回；epoch 曲线与混淆矩阵属于明细大字段，默认裁剪
         "metrics": {
-            "train_loss": json.loads(r.train_losses) if r.train_losses else [],
-            "train_acc": json.loads(r.train_accs) if r.train_accs else [],
-            "val_loss": json.loads(r.val_losses) if r.val_losses else [],
-            "val_acc": json.loads(r.val_accs) if r.val_accs else [],
             "test_loss": r.test_loss, "test_acc": r.test_accuracy,
         },
-        "confusion_matrix": json.loads(r.confusion_matrix) if r.confusion_matrix else [],
         "test_accuracy": r.test_accuracy, "best_epoch": r.best_epoch,
         "training_time": r.training_time, "overfitting_score": r.overfitting_score,
         "runtime_ms": r.runtime_ms,
         "created_at": str(r.created_at) if r.created_at else None,
     }
+    if include_data:
+        d["metrics"].update({
+            "train_loss": json.loads(r.train_losses) if r.train_losses else [],
+            "train_acc": json.loads(r.train_accs) if r.train_accs else [],
+            "val_loss": json.loads(r.val_losses) if r.val_losses else [],
+            "val_acc": json.loads(r.val_accs) if r.val_accs else [],
+        })
+        d["confusion_matrix"] = json.loads(r.confusion_matrix) if r.confusion_matrix else []
+    return d

@@ -82,14 +82,31 @@ class TestExperimentAPI:
         assert data["total_runs"] == 2
 
     async def test_list_maze_runs(self, client):
+        # P-性能：/runs 列表改为 {items,total,limit,offset} 分页信封；默认裁剪明细大字段
         resp = await client.get("/api/experiments/runs")
         assert resp.status_code == 200
-        assert isinstance(resp.json(), list)
+        data = resp.json()
+        assert isinstance(data, dict)
+        assert {"items", "total", "limit", "offset"} <= set(data.keys())
+        assert isinstance(data["items"], list)
+        assert data["limit"] == 50 and data["offset"] == 0
+        assert data["total"] >= len(data["items"])  # total 是全量计数，可大于本页条数
+        for it in data["items"]:
+            assert "path" not in it and "visited_nodes" not in it and "maze_grid" not in it
 
     async def test_list_classify_runs(self, client):
         resp = await client.get("/api/classify/runs")
         assert resp.status_code == 200
-        assert isinstance(resp.json(), list)
+        data = resp.json()
+        assert isinstance(data, dict)
+        assert {"items", "total", "limit", "offset"} <= set(data.keys())
+        assert isinstance(data["items"], list)
+        for it in data["items"]:
+            assert "points" not in it and "labels" not in it
+        # include_data=true 时明细大字段返回
+        resp2 = await client.get("/api/classify/runs?include_data=true")
+        assert resp2.status_code == 200
+        assert isinstance(resp2.json()["items"], list)
 
 
 @pytest.mark.anyio

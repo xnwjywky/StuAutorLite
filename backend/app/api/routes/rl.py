@@ -1,23 +1,22 @@
 """强化学习格子世界实验 API — 设计文档 §4.4"""
 import json, uuid, logging
-from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session as DbSession
 from pydantic import BaseModel, Field
 from app.models.database import get_db, Session as SessionModel, RLRun
 from app.core.rl import RLRunner
+from app.utils.heavy import run_heavy
+from app.utils.logger import get_file_handler
+from app.utils.pagination import paginate
 
 router = APIRouter(prefix="/rl", tags=["rl"])
 runner = RLRunner()
 
-# RL 专用日志
-_LOG_DIR = Path(__file__).resolve().parent.parent.parent.parent / "logs"
+# RL 专用日志（P-性能：轮转 handler，防 rl_errors.log 无限增长）
 _rl_log = logging.getLogger("rl")
 _rl_log.setLevel(logging.DEBUG)
 if not _rl_log.handlers:
-    _fh = logging.FileHandler(str(_LOG_DIR / "rl_errors.log"), encoding="utf-8")
-    _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-    _rl_log.addHandler(_fh)
+    _rl_log.addHandler(get_file_handler("rl_errors.log", fmt="%(asctime)s [%(levelname)s] %(message)s"))
 
 
 class RLRunRequest(BaseModel):
@@ -27,8 +26,14 @@ class RLRunRequest(BaseModel):
 
 
 @router.post("/run")
-def run_rl_experiment(req: RLRunRequest, db: DbSession = Depends(get_db)):
-    """运行强化学习实验。"""
+async def run_rl_experiment(req: RLRunRequest, db: DbSession = Depends(get_db)):
+    """运行强化学习实验。
+
+    P-性能：训练是纯 Python CPU 密集（可数分钟），改为 async def 并交由专用
+    重型执行器（heavy-executor，3 worker）执行，避免长时间占用 FastAPI 默认
+    线程池（~40 worker）饿死其它同步端点。CPU 部分 await 结束后才在事件循环
+    线程做轻量 DB 落库。
+    """
     _rl_log.info("RL run: session=%d agents=%s settings=%s", req.session_id, req.agents, req.settings)
     agents = req.agents
     settings = req.settings
@@ -49,7 +54,7 @@ def run_rl_experiment(req: RLRunRequest, db: DbSession = Depends(get_db)):
     session_id = req.session_id
 
     try:
-        result = runner.run(config)
+        result = await run_heavy(runner.run, config)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"RL 实验运行失败: {str(e)}")
 
@@ -86,13 +91,15 @@ def run_rl_experiment(req: RLRunRequest, db: DbSession = Depends(get_db)):
 
 
 @router.post("/eval-compare")
-def eval_compare(req: RLRunRequest):
+async def eval_compare(req: RLRunRequest):
     """轨迹对比 + 策略演变：同地图训练两个 agent，返回叠加路径和 Q 表快照。
 
     额外返回:
       - compare_paths: {Q_LEARNING: [[x,y],...], SARSA: [[x,y],...]}
       - q_snapshots: [{episode, agent, cells: [[{best_action, max_q, q_values}]]}]
       - train_rewards / train_success: {Q_LEARNING: [...], SARSA: [...]}
+
+    P-性能：CPU 密集训练经 run_heavy 交给专用重型执行器，不占默认线程池。
     """
     agents = req.agents
     settings = req.settings
@@ -112,7 +119,7 @@ def eval_compare(req: RLRunRequest):
                  req.session_id, req.agents, req.settings)
 
     try:
-        result = runner.run_eval_compare(config)
+        result = await run_heavy(runner.run_eval_compare, config)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"RL 轨迹对比失败: {str(e)}")
 
@@ -121,26 +128,35 @@ def eval_compare(req: RLRunRequest):
 
 
 @router.get("/runs")
-def list_rl_runs(session_id: int | None = None, db: DbSession = Depends(get_db)):
+def list_rl_runs(session_id: int | None = None, include_data: bool = False,
+                 limit: int = 50, offset: int = 0, db: DbSession = Depends(get_db)):
+    """列表接口分页 + 裁剪（P-性能）：默认仅返回元数据与指标，不携带
+    train_rewards/train_success/test_path/world 等 JSON 大字段（除非 include_data=true）；
+    limit/offset 分页（默认 50 条/页，上限 200），避免全量返回巨型 JSON。"""
     q = db.query(RLRun)
     if session_id:
         q = q.filter(RLRun.session_id == session_id)
-    return [_run_to_dict(r) for r in q.order_by(RLRun.id.desc()).all()]
+    return paginate(
+        q.order_by(RLRun.id.desc()), limit, offset,
+        lambda r: _run_to_dict(r, include_data=include_data),
+    )
 
 
-def _run_to_dict(r) -> dict:
-    return {
+def _run_to_dict(r, include_data: bool = False) -> dict:
+    d = {
         "id": r.id, "session_id": r.session_id, "batch_id": r.batch_id,
         "agent": r.agent, "grid_size": r.grid_size, "num_traps": r.num_traps,
         "num_episodes": r.num_episodes, "learning_rate": r.learning_rate,
         "discount": r.discount, "epsilon": r.epsilon,
         "trial": r.trial, "seed": r.seed,
-        "train_rewards": json.loads(r.train_rewards) if r.train_rewards else [],
-        "train_success": json.loads(r.train_success) if r.train_success else [],
         "avg_reward": r.avg_reward, "success_rate": r.success_rate,
         "test_success": bool(r.test_success), "test_reward": r.test_reward,
-        "test_path": json.loads(r.test_path) if r.test_path else [],
-        "world": json.loads(r.world_json) if r.world_json else {},
         "runtime_ms": r.runtime_ms,
         "created_at": str(r.created_at) if r.created_at else None,
     }
+    if include_data:
+        d["train_rewards"] = json.loads(r.train_rewards) if r.train_rewards else []
+        d["train_success"] = json.loads(r.train_success) if r.train_success else []
+        d["test_path"] = json.loads(r.test_path) if r.test_path else []
+        d["world"] = json.loads(r.world_json) if r.world_json else {}
+    return d

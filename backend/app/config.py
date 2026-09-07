@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     # 用于课堂/共享环境防止 LLM 端点被刷产生费用。
     rate_limit_per_minute: int = 0
 
+    # 留存（P-性能）：运行明细大字段保留天数。超过该天数的 runs 明细（steps/path/
+    # predictions 等 JSON 大字段）在启动后台清理中置空以控制 SQLite 体积，
+    # 统计指标与整行记录保留。0=关闭清理。
+    run_retention_days: int = 60
+
     # LLM
     llm_api_key: str = ""
     llm_base_url: str = "https://api.openai.com/v1"

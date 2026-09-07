@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session as DbSession
 from pydantic import BaseModel, Field
 from app.models.database import get_db, Session as SessionModel, GuessRun
 from app.core.guessnumber.runner import GuessNumberRunner
+from app.utils.pagination import paginate
 
 router = APIRouter(prefix="/guessnumber", tags=["guessnumber"])
 runner = GuessNumberRunner()
@@ -61,18 +62,27 @@ def run_guess_experiment(req: GuessRunRequest, db: DbSession = Depends(get_db)):
 
 
 @router.get("/runs")
-def list_guess_runs(session_id: int | None = None, db: DbSession = Depends(get_db)):
+def list_guess_runs(session_id: int | None = None, include_data: bool = False,
+                    limit: int = 50, offset: int = 0, db: DbSession = Depends(get_db)):
+    """列表接口分页 + 裁剪（P-性能）：默认不携带 history 大字段（除非 include_data=true），
+    limit/offset 分页（默认 50 条/页，上限 200）。"""
     q = db.query(GuessRun)
     if session_id:
         q = q.filter(GuessRun.session_id == session_id)
-    return [_run_to_dict(r) for r in q.order_by(GuessRun.id.desc()).all()]
+    return paginate(
+        q.order_by(GuessRun.id.desc()), limit, offset,
+        lambda r: _run_to_dict(r, include_data=include_data),
+    )
 
 
-def _run_to_dict(r) -> dict:
-    return {
+def _run_to_dict(r, include_data: bool = False) -> dict:
+    d = {
         "id": r.id, "session_id": r.session_id, "batch_id": r.batch_id,
         "strategy": r.strategy, "target": r.target,
         "trial": r.trial, "guesses": r.guesses,
-        "history": json.loads(r.history_data) if r.history_data else [],
         "success": bool(r.success), "runtime_ms": r.runtime_ms,
+        "created_at": str(r.created_at) if r.created_at else None,
     }
+    if include_data:
+        d["history"] = json.loads(r.history_data) if r.history_data else []
+    return d

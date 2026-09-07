@@ -256,7 +256,10 @@ export async function runImageRecogExperiment(data: {
   return apiClient.post("/api/imagerecog/run", data, { timeout: 600000 }) as Promise<any>;
 }
 
-/** SSE 流式运行 — 返回 ReadableStream 用于实时进度 */
+/** SSE 流式运行 — 返回 ReadableStream 用于实时进度。
+ * signal（可选）：调用方 AbortController.signal，中止时透传给底层 fetch 并静默退出
+ * （P-性能：imagerecog SSE abort 未透传 bug 修复——不传 signal 时前端取消请求，
+ * 后端/底层 fetch 感知不到，仍继续空转计算）。 */
 export async function runImageRecogStream(
   data: {
     session_id: number; experiment_type: string; algorithms: string[];
@@ -264,16 +267,23 @@ export async function runImageRecogStream(
   },
   onEvent: (event: any) => void,
   onError: (err: Error) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const baseUrl = detectBaseUrl();
+  // P0-2：裸 fetch 不像 axios 那样带 X-App-Key，启用鉴权时需手动补头，否则 401
+  const appKey = (import.meta.env.VITE_APP_KEY ?? "").trim();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (appKey) headers["X-App-Key"] = appKey;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   try {
     const resp = await fetch(`${baseUrl}/api/imagerecog/run-stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(data),
+      signal,
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const reader = resp.body?.getReader();
+    reader = resp.body?.getReader() ?? null;
     if (!reader) throw new Error("无法读取响应流");
     const decoder = new TextDecoder();
     let buffer = "";
@@ -295,6 +305,11 @@ export async function runImageRecogStream(
       }
     }
   } catch (e) {
+    // AbortController.abort() 触发的 AbortError 属于主动取消：静默返回，不报错
+    if (e instanceof DOMException && e.name === "AbortError") return;
     onError(e as Error);
+  } finally {
+    // 中止/完成时关闭底层流，及时释放连接（取消请求时让后端感知断开）
+    if (reader) await reader.cancel().catch(() => {});
   }
 }

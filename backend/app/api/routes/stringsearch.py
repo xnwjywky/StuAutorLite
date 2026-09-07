@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session as DbSession
 from pydantic import BaseModel, Field
 from app.models.database import get_db, Session as SessionModel, StringSearchRun
 from app.core.stringsearch.runner import StringSearchRunner
+from app.utils.pagination import paginate
 
 router = APIRouter(prefix="/stringsearch", tags=["stringsearch"])
 runner = StringSearchRunner()
@@ -55,20 +56,31 @@ def run_string_search(req: StringSearchRunRequest, db: DbSession = Depends(get_d
 
 
 @router.get("/runs")
-def list_runs(session_id: int | None = None, db: DbSession = Depends(get_db)):
+def list_runs(session_id: int | None = None, include_data: bool = False,
+              limit: int = 50, offset: int = 0, db: DbSession = Depends(get_db)):
+    """列表接口分页 + 裁剪（P-性能）：默认不携带 text/pattern/match_positions/steps
+    大字段（除非 include_data=true），limit/offset 分页（默认 50 条/页，上限 200）。"""
     q = db.query(StringSearchRun)
-    if session_id: q = q.filter(StringSearchRun.session_id == session_id)
-    return [_run_to_dict(r) for r in q.order_by(StringSearchRun.id.desc()).all()]
+    if session_id:
+        q = q.filter(StringSearchRun.session_id == session_id)
+    return paginate(
+        q.order_by(StringSearchRun.id.desc()), limit, offset,
+        lambda r: _run_to_dict(r, include_data=include_data),
+    )
 
 
-def _run_to_dict(r) -> dict:
-    return {
+def _run_to_dict(r, include_data: bool = False) -> dict:
+    d = {
         "id": r.id, "session_id": r.session_id, "batch_id": r.batch_id,
         "algorithm": r.algorithm, "text_length": r.text_length,
         "pattern_length": r.pattern_length, "pattern_type": r.pattern_type,
         "trial": r.trial, "seed": r.seed,
         "matches": r.matches, "comparisons": r.comparisons, "runtime_ms": r.runtime_ms,
-        "text": r.text_data, "pattern": r.pattern_data,
-        "match_positions": json.loads(r.match_positions) if r.match_positions else [],
-        "steps": json.loads(r.steps_data) if r.steps_data else [],
+        "created_at": str(r.created_at) if r.created_at else None,
     }
+    if include_data:
+        d["text"] = r.text_data
+        d["pattern"] = r.pattern_data
+        d["match_positions"] = json.loads(r.match_positions) if r.match_positions else []
+        d["steps"] = json.loads(r.steps_data) if r.steps_data else []
+    return d

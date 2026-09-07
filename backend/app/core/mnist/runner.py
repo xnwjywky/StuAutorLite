@@ -42,14 +42,14 @@ def is_cancelled() -> bool:
     return _cancel_event.is_set()
 
 # ── 训练专用日志（仅写文件，不输出到控制台）──
-_LOG_DIR = Path(__file__).resolve().parent.parent.parent.parent / "logs"
-_LOG_DIR.mkdir(exist_ok=True)
+# P-性能：改用轮转 handler，防 mnist_errors.log 无限增长。与 mnist 路由/前端共享
+# 同一进程级 handler（同文件名同配置缓存单例），不会重复轮转同一文件。
+from app.utils.logger import get_file_handler
+
 _train_log = logging.getLogger("mnist.train")
 _train_log.setLevel(logging.DEBUG)
 if not _train_log.handlers:
-    _fh = logging.FileHandler(str(_LOG_DIR / "mnist_errors.log"), encoding="utf-8")
-    _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-    _train_log.addHandler(_fh)
+    _train_log.addHandler(get_file_handler("mnist_errors.log", fmt="%(asctime)s [%(levelname)s] %(message)s"))
     # 不再输出到 StreamHandler — 训练日志量大，会淹没 uvicorn 控制台
     _train_log.propagate = False  # 也不向 root logger 传播
 

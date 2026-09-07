@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session as DbSession
 from pydantic import BaseModel, Field
 from app.models.database import get_db, Session as SessionModel, DigitsRun
 from app.core.digits.runner import DigitsRunner
+from app.utils.pagination import paginate
 
 router = APIRouter(prefix="/digits", tags=["digits"])
 runner = DigitsRunner()
@@ -55,21 +56,30 @@ def run_digits(req: DigitsRunRequest, db: DbSession = Depends(get_db)):
 
 
 @router.get("/runs")
-def list_runs(session_id: int | None = None, db: DbSession = Depends(get_db)):
+def list_runs(session_id: int | None = None, include_data: bool = False,
+              limit: int = 50, offset: int = 0, db: DbSession = Depends(get_db)):
+    """列表接口分页 + 裁剪（P-性能）：默认不携带 test_grids/test_labels/predictions
+    大字段（除非 include_data=true），limit/offset 分页（默认 50 条/页，上限 200）。"""
     q = db.query(DigitsRun)
     if session_id:
         q = q.filter(DigitsRun.session_id == session_id)
-    return [_run_to_dict(r) for r in q.order_by(DigitsRun.id.desc()).all()]
+    return paginate(
+        q.order_by(DigitsRun.id.desc()), limit, offset,
+        lambda r: _run_to_dict(r, include_data=include_data),
+    )
 
 
-def _run_to_dict(r) -> dict:
-    return {
+def _run_to_dict(r, include_data: bool = False) -> dict:
+    d = {
         "id": r.id, "session_id": r.session_id, "batch_id": r.batch_id,
         "algorithm": r.algorithm, "n_samples": r.n_samples,
         "noise_level": r.noise_level, "trial": r.trial, "seed": r.seed,
         "accuracy": r.accuracy, "correct": r.correct, "total": r.total,
         "runtime_ms": r.runtime_ms, "train_ratio": r.train_ratio,
-        "test_grids": json.loads(r.test_grids_data) if r.test_grids_data else [],
-        "test_labels": json.loads(r.test_labels_data) if r.test_labels_data else [],
-        "predictions": json.loads(r.predictions_data) if r.predictions_data else [],
+        "created_at": str(r.created_at) if r.created_at else None,
     }
+    if include_data:
+        d["test_grids"] = json.loads(r.test_grids_data) if r.test_grids_data else []
+        d["test_labels"] = json.loads(r.test_labels_data) if r.test_labels_data else []
+        d["predictions"] = json.loads(r.predictions_data) if r.predictions_data else []
+    return d

@@ -3,6 +3,7 @@
 """
 
 import json
+import os
 import re
 import time
 import threading
@@ -56,7 +57,8 @@ class AgentGateway:
         self.agents: dict[str, object] = {}
         self._call_log: deque = deque(maxlen=_MAX_CALL_LOG)  # S-中-4：自动截断，内存有上限
         # Token 用量累计（持久化到 JSON，重启不丢失；节流落盘，S-中-5）
-        self._usage_lock = threading.Lock()
+        self._usage_lock = threading.Lock()   # 保护内存计数 + 最后落盘时间
+        self._save_lock = threading.Lock()    # 串行化磁盘写（防并发写 .tmp 相互覆盖）
         self._last_usage_save: float = 0.0
         self._usage: dict = {
             "prompt_tokens": 0,
@@ -72,8 +74,11 @@ class AgentGateway:
     def record_usage(self, usage: dict | None, model: str = ""):
         """记录一次 LLM 调用消耗。usage 为 None 时只累计调用次数。
 
-        S-中-5：内存实时累计，落盘改为节流（≥30s 一次），避免高并发
-        下每次调用都触发文件 I/O 与锁竞争；进程退出时由 flush 兜底。
+        S-中-5：内存实时累计（锁内更新），落盘改为节流（≥30s 一次）。
+        P-性能修复：此前 `_last_usage_save` 从未在 record_usage 中推进，导致
+        实际每次调用都落盘（高频文件 I/O）；且写盘读取计数时未持锁、与其它线程
+        的更新形成读写竞态。现在：计数在锁内更新；触发落盘时才推进时间戳；
+        磁盘写由 _save_usage 内部快照 + 写锁串行化。
         """
         with self._usage_lock:
             self._usage["calls"] += 1
@@ -85,7 +90,10 @@ class AgentGateway:
                 self._usage["total_tokens"] += int(usage.get("total_tokens") or 0)
             if not self._usage["since"]:
                 self._usage["since"] = time.time()
-            should_save = (time.time() - self._last_usage_save) >= _USAGE_SAVE_INTERVAL
+            now = time.time()
+            should_save = (now - self._last_usage_save) >= _USAGE_SAVE_INTERVAL
+            if should_save:
+                self._last_usage_save = now  # 推进节流时间戳，避免每次都写
         if should_save:
             self._save_usage()
 
@@ -108,11 +116,19 @@ class AgentGateway:
             logger.warning("token_usage.json 读取失败，使用内存计数")
 
     def _save_usage(self):
+        # 先持用量锁做快照，再在写锁内落盘：写盘期间其它线程仍可更新内存计数，
+        # 快照保证 json.dumps 不读到被并发改写到一半的 dict（旧实现的读写竞态）。
+        with self._usage_lock:
+            payload = dict(self._usage)
         try:
             _USAGE_FILE.parent.mkdir(parents=True, exist_ok=True)
             tmp = _USAGE_FILE.with_suffix(".tmp")
-            tmp.write_text(json.dumps(self._usage, ensure_ascii=False, indent=2), encoding="utf-8")
-            tmp.replace(_USAGE_FILE)
+            with self._save_lock:
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, ensure_ascii=False, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                tmp.replace(_USAGE_FILE)
         except Exception:
             pass
 

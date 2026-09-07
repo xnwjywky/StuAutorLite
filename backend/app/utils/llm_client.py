@@ -1,10 +1,63 @@
-"""LLM API 调用封装 — 支持 OpenAI 和 Anthropic 协议"""
+"""LLM API 调用封装 — 支持 OpenAI 和 Anthropic 协议
 
+P-性能修复：LLM 调用改为进程级共享 httpx.AsyncClient（连接池复用），
+不再每次调用都新建 client —— 建连/断连/TLS 握手开销全部省掉，支持
+HTTP keep-alive 长连接。共享 client 惰性绑定到「第一个使用它的事件循环」，
+检测到运行 loop 变化（如 pytest-anyio 每个测试新建 loop）时自动关闭重建，
+生产（uvicorn 单 loop）下跨请求稳定复用。
+"""
+
+import asyncio
 import json
+
 import httpx
+
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# ── 进程级共享连接池 ────────────────────────────────────────
+# 延迟创建，首次调用 get_shared_client 时才实例化；async with 无需手动 close。
+# 构造是纯同步的（不建连、不绑定 loop），check→create→assign 之间无 await，
+# 单线程 asyncio 中不可能被其它协程插入，故无需加锁。
+_shared_client: httpx.AsyncClient | None = None
+_shared_client_loop: asyncio.AbstractEventLoop | None = None
+
+
+async def get_shared_client() -> httpx.AsyncClient:
+    """返回进程级共享 AsyncClient（连接池），loop 变化时自动重建。"""
+    global _shared_client, _shared_client_loop
+    loop = asyncio.get_running_loop()
+    client = _shared_client
+    if client is not None and _shared_client_loop is loop:
+        return client
+    # 旧 client 属于其它事件循环 → 先摘除再关闭，最后在当前 loop 重建
+    if client is not None:
+        _shared_client = None
+        _shared_client_loop = None
+        try:
+            await client.aclose()
+        except Exception:
+            pass
+    _shared_client = httpx.AsyncClient(
+        timeout=60.0,
+        limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+    )
+    _shared_client_loop = loop
+    return _shared_client
+
+
+async def close_shared_client() -> None:
+    """关闭共享 client（应用退出 / lifespan 收尾时调用）。"""
+    global _shared_client, _shared_client_loop
+    if _shared_client is not None:
+        client = _shared_client
+        _shared_client = None
+        _shared_client_loop = None
+        try:
+            await client.aclose()
+        except Exception:
+            pass
 
 # Anthropic Messages API 中 user 消息只能与 assistant 交替出现，
 # 且必须以 user 开头。连续两个 user 需要合并。
@@ -47,16 +100,16 @@ class LLMClient:
         return await self._chat_openai(messages, **kwargs)
 
     async def _chat_openai(self, messages: list[dict], **kwargs) -> dict:
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                self.endpoint,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={"model": self.model, "messages": messages, **kwargs},
-            )
-            return self._handle_response(resp)
+        client = await get_shared_client()  # 复用进程级连接池（不可 async with：那会关闭它）
+        resp = await client.post(
+            self.endpoint,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json={"model": self.model, "messages": messages, **kwargs},
+        )
+        return self._handle_response(resp)
 
     async def _chat_anthropic(self, messages: list[dict], **kwargs) -> dict:
         # Anthropic Messages API 格式
@@ -82,17 +135,17 @@ class LLMClient:
         if system_prompt.strip():
             body["system"] = system_prompt.strip()
 
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                self.endpoint,
-                headers={
-                    "x-api-key": self.api_key,
-                    "Content-Type": "application/json",
-                    "anthropic-version": "2023-06-01",
-                },
-                json=body,
-            )
-            return self._handle_response(resp)
+        client = await get_shared_client()  # 复用进程级连接池
+        resp = await client.post(
+            self.endpoint,
+            headers={
+                "x-api-key": self.api_key,
+                "Content-Type": "application/json",
+                "anthropic-version": "2023-06-01",
+            },
+            json=body,
+        )
+        return self._handle_response(resp)
 
     def _handle_response(self, resp: httpx.Response) -> dict:
         try:
